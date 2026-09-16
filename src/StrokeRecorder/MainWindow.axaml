@@ -1,0 +1,332 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="StrokeFieldGuide.Recorder.MainWindow"
+        Title="Record a stroke — Stroke Field Guide"
+        Width="1100" Height="740"
+        Background="#F7F7F4">
+
+  <Window.Styles>
+    <Style Selector="TextBlock.h1">
+      <Setter Property="FontSize" Value="22" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="TextBlock.lede">
+      <Setter Property="TextWrapping" Value="Wrap" />
+      <Setter Property="Foreground" Value="#4A4A46" />
+      <Setter Property="LineHeight" Value="20" />
+    </Style>
+    <Style Selector="TextBlock.label">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="Foreground" Value="#7A7A74" />
+    </Style>
+    <Style Selector="TextBlock.value">
+      <Setter Property="FontFamily" Value="Consolas,Menlo,monospace" />
+      <Setter Property="FontSize" Value="16" />
+    </Style>
+    <Style Selector="Border.readout">
+      <Setter Property="Background" Value="#FFFFFF" />
+      <Setter Property="BorderBrush" Value="#E2E2DC" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="10,7" />
+      <Setter Property="MinWidth" Value="120" />
+    </Style>
+    <!-- One finding. The stripe carries the tone, so the words do not have to. -->
+    <Style Selector="Border.finding">
+      <Setter Property="Background" Value="#FFFFFF" />
+      <Setter Property="BorderBrush" Value="#E2E2DC" />
+      <Setter Property="BorderThickness" Value="4,1,1,1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="12,10" />
+    </Style>
+
+    <Style Selector="Border.step">
+      <Setter Property="Background" Value="#FFFFFF" />
+      <Setter Property="BorderBrush" Value="#E2E2DC" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="9,4" />
+    </Style>
+    <Style Selector="Border.step TextBlock">
+      <Setter Property="Foreground" Value="#8A8A84" />
+    </Style>
+    <Style Selector="Border.step.here">
+      <Setter Property="Background" Value="#2B2B28" />
+      <Setter Property="BorderBrush" Value="#2B2B28" />
+    </Style>
+    <Style Selector="Border.step.here TextBlock">
+      <Setter Property="Foreground" Value="#FFFFFF" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="Border.step.done TextBlock">
+      <Setter Property="Foreground" Value="#2B2B28" />
+    </Style>
+
+    <!-- One gesture, offered. A ToggleButton so the chosen one stays looking chosen. -->
+    <Style Selector="ToggleButton.gesture">
+      <Setter Property="Background" Value="#FFFFFF" />
+      <Setter Property="BorderBrush" Value="#E2E2DC" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="14" />
+      <Setter Property="Margin" Value="0,0,12,12" />
+      <!-- Narrow enough that two sit side by side in the space this step leaves, and the
+           panel falls back to one column rather than clipping when the window is small. -->
+      <Setter Property="Width" Value="296" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    </Style>
+    <Style Selector="ToggleButton.gesture:checked">
+      <Setter Property="BorderBrush" Value="#2B2B28" />
+      <Setter Property="BorderThickness" Value="2" />
+      <Setter Property="Padding" Value="13" />
+    </Style>
+    <Style Selector="ToggleButton.gesture:checked /template/ ContentPresenter">
+      <Setter Property="Background" Value="#FFFFFF" />
+    </Style>
+  </Window.Styles>
+
+  <DockPanel>
+
+    <!-- The rail, so the five steps are visible before any of them is reached. -->
+    <Border DockPanel.Dock="Top" Background="#FFFFFF" BorderBrush="#E2E2DC"
+            BorderThickness="0,0,0,1" Padding="18,14">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <TextBlock Text="Record a stroke" Classes="h1" VerticalAlignment="Center"
+                   Margin="0,0,20,0" />
+        <Border Classes="step" Name="Step1"><TextBlock Text="1  Your pen" /></Border>
+        <Border Classes="step" Name="Step2"><TextBlock Text="2  Gesture" /></Border>
+        <Border Classes="step" Name="Step3"><TextBlock Text="3  Record" /></Border>
+        <Border Classes="step" Name="Step4"><TextBlock Text="4  Review" /></Border>
+        <Border Classes="step" Name="Step5"><TextBlock Text="5  Save" /></Border>
+      </StackPanel>
+    </Border>
+
+    <!-- The foot, which is where the wizard is driven from. -->
+    <Border DockPanel.Dock="Bottom" Background="#FFFFFF" BorderBrush="#E2E2DC"
+            BorderThickness="0,1,0,0" Padding="18,12">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Name="Back" Content="Back" IsEnabled="False" />
+
+          <!-- The two ways out of a finished take, in the bar navigation already lives in
+               rather than buried under a screen of findings. -->
+          <Button Name="AgainSame" Content="Record it again" IsVisible="False" />
+          <Button Name="AgainOther" Content="Another gesture" IsVisible="False" />
+        </StackPanel>
+
+        <TextBlock Name="FootNote" Grid.Column="1" Classes="lede" VerticalAlignment="Center"
+                   Margin="16,0" TextWrapping="Wrap" />
+        <Button Name="Next" Grid.Column="2" Content="Next" IsEnabled="False" />
+      </Grid>
+    </Border>
+
+    <Panel>
+
+    <Grid Name="StepOne" ColumnDefinitions="380,*" Margin="18">
+
+      <!-- ─────────────────────────────────────────────── what this step is for ── -->
+      <!-- Scrolled, because the conventions line is as long as the backend makes it and a
+           short window had it drawn over the foot. -->
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                    Margin="0,0,18,0">
+      <StackPanel Spacing="14">
+        <TextBlock Text="First, check the pen is reporting" FontSize="18"
+                   FontWeight="SemiBold" TextWrapping="Wrap" />
+
+        <TextBlock Classes="lede"
+                   Text="A session is already open on the backend below. Hover over the strip and press down: it draws, and the width follows pressure, so you can see what this machine is actually being told. A minute here saves recording a trace that turns out to be a mouse." />
+
+        <StackPanel Spacing="4">
+          <TextBlock Text="Backend" Classes="label" />
+          <ComboBox Name="Backends" HorizontalAlignment="Stretch" />
+          <TextBlock Name="BackendWorth" Classes="lede" FontSize="12" Margin="0,4,0,0" />
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" Spacing="8">
+          <Button Name="Start" Content="Start" />
+          <Button Name="Clear" Content="Clear the strip" />
+        </StackPanel>
+
+        <Border Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
+                CornerRadius="4" Padding="12">
+          <StackPanel Spacing="6">
+            <TextBlock Name="Verdict" Classes="lede" Text="No session open." />
+            <TextBlock Name="Conventions" Classes="lede" FontSize="12" />
+          </StackPanel>
+        </Border>
+      </StackPanel>
+      </ScrollViewer>
+
+      <!-- ────────────────────────────────────────────────────── the instrument ── -->
+      <DockPanel Grid.Column="1">
+
+        <Border DockPanel.Dock="Bottom" Margin="0,14,0,0">
+          <WrapPanel Name="Readouts" Orientation="Horizontal" />
+        </Border>
+
+        <Border Background="#FFFFFF" BorderBrush="#D8D8D2" BorderThickness="1"
+                CornerRadius="4" ClipToBounds="True">
+          <Panel Name="StripHost">
+            <TextBlock Name="StripHint" Text="Hover and press here"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Foreground="#B8B8B2" FontSize="15" />
+          </Panel>
+        </Border>
+
+      </DockPanel>
+    </Grid>
+
+    <!-- ──────────────────────────────────────────────────────── five: save ── -->
+    <Grid Name="StepFive" ColumnDefinitions="480,*" Margin="18" IsVisible="False">
+
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                    Margin="0,0,18,0">
+        <StackPanel Spacing="14">
+          <TextBlock Text="Say what made it, and keep it" FontSize="18"
+                     FontWeight="SemiBold" TextWrapping="Wrap" />
+
+          <TextBlock Classes="lede"
+                     Text="The session knows which API answered and what its full scale is. It cannot know which tablet is on the desk or which driver is installed, and those are what somebody comparing two recordings wants first." />
+
+          <StackPanel Spacing="4">
+            <TextBlock Text="Tablet" Classes="label" />
+            <TextBox Name="Tablet" Watermark="Wacom Cintiq 24" />
+          </StackPanel>
+
+          <StackPanel Spacing="4">
+            <TextBlock Text="Driver" Classes="label" />
+            <TextBox Name="Driver" Watermark="Wacom driver 6.4.14-1" />
+          </StackPanel>
+
+          <StackPanel Spacing="4">
+            <TextBlock Text="What the hand was asked to do" Classes="label" />
+            <TextBox Name="Intent" AcceptsReturn="True" TextWrapping="Wrap" Height="76" />
+          </StackPanel>
+
+          <StackPanel Spacing="4">
+            <TextBlock Text="File name" Classes="label" />
+            <TextBox Name="FileName" />
+            <TextBlock Name="Folder" Classes="lede" FontSize="11" TextWrapping="Wrap" />
+          </StackPanel>
+
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Name="Save" Content="Save the take" />
+            <Button Name="ShowFolder" Content="Open the folder" />
+          </StackPanel>
+
+          <Border Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
+                  CornerRadius="4" Padding="12">
+            <TextBlock Name="SaveState" Classes="lede" Text="Not saved yet." />
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <Border Grid.Column="1" Background="#FFFFFF" BorderBrush="#D8D8D2" BorderThickness="1"
+              CornerRadius="4" Padding="14" ClipToBounds="True">
+        <DockPanel>
+          <TextBlock DockPanel.Dock="Top" Text="What goes in the file" Classes="label"
+                     Margin="0,0,0,8" />
+          <ScrollViewer>
+            <TextBlock Name="Preview" FontFamily="Consolas,Menlo,monospace" FontSize="11"
+                       TextWrapping="NoWrap" Foreground="#3A3A36" />
+          </ScrollViewer>
+        </DockPanel>
+      </Border>
+    </Grid>
+
+    <!-- ────────────────────────────────────────────────────── four: review ── -->
+    <Grid Name="StepFour" ColumnDefinitions="440,*" Margin="18" IsVisible="False">
+
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                    Margin="0,0,18,0">
+        <StackPanel Spacing="12">
+          <TextBlock Text="What you actually recorded" FontSize="18"
+                     FontWeight="SemiBold" TextWrapping="Wrap" />
+
+          <TextBlock Classes="lede"
+                     Text="Conclusions rather than figures, because a screen of figures is a screen nobody reads twice. Anything marked for attention is usable — it just is not evidence for what somebody would assume it was." />
+
+          <StackPanel Name="FindingList" Spacing="8" />
+        </StackPanel>
+      </ScrollViewer>
+
+      <Border Grid.Column="1" Background="#FFFFFF" BorderBrush="#D8D8D2" BorderThickness="1"
+              CornerRadius="4" ClipToBounds="True">
+        <Panel Name="ReviewHost" />
+      </Border>
+    </Grid>
+
+    <!-- ────────────────────────────────────────────────────── three: record ── -->
+    <Grid Name="StepThree" ColumnDefinitions="380,*" Margin="18" IsVisible="False">
+
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                    Margin="0,0,18,0">
+        <StackPanel Spacing="14">
+          <TextBlock Name="TakeTitle" Text="Draw when you are ready" FontSize="18"
+                     FontWeight="SemiBold" TextWrapping="Wrap" />
+
+          <TextBlock Name="TakeBrief" Classes="lede" />
+
+          <TextBlock Classes="lede" FontSize="12"
+                     Text="The recording starts when the tip touches down and ends when it lifts, so there is nothing to press at either end. The guide on the pad is there to follow and is not part of what is recorded." />
+
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Name="Arm" Content="Arm" />
+            <Button Name="Again" Content="Throw it away" IsEnabled="False" />
+          </StackPanel>
+
+          <Border Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
+                  CornerRadius="4" Padding="12">
+            <StackPanel Spacing="6">
+              <TextBlock Name="TakeState" Classes="lede" Text="Not armed." />
+              <TextBlock Name="TakeDetail" Classes="lede" FontSize="12" />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <DockPanel Grid.Column="1">
+        <Border DockPanel.Dock="Bottom" Margin="0,14,0,0">
+          <WrapPanel Name="TakeReadouts" Orientation="Horizontal" />
+        </Border>
+
+        <Border Background="#FFFFFF" BorderBrush="#D8D8D2" BorderThickness="1"
+                CornerRadius="4" ClipToBounds="True">
+          <Panel Name="PadHost" />
+        </Border>
+      </DockPanel>
+    </Grid>
+
+    <!-- ───────────────────────────────────────────────────── two: the gesture ── -->
+    <Grid Name="StepTwo" ColumnDefinitions="380,*" Margin="18" IsVisible="False">
+
+      <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                    Margin="0,0,18,0">
+        <StackPanel Spacing="14">
+          <TextBlock Text="Next, decide what you are recording" FontSize="18"
+                     FontWeight="SemiBold" TextWrapping="Wrap" />
+
+          <TextBlock Classes="lede"
+                     Text="Pick one. Each of these exists to show something a different one cannot, and what that is stays with the recording, so a trace can still be read months later by somebody who was not holding the pen." />
+
+          <TextBlock Classes="lede"
+                     Text="The first two are the same line at different speeds. That pairing is the useful one: anything that differs between them is about how fast the hand moved and cannot be about the shape it moved through." />
+
+          <Border Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
+                  CornerRadius="4" Padding="12">
+            <StackPanel Spacing="6">
+              <TextBlock Text="What this one is for" Classes="label" />
+              <TextBlock Name="Wants" Classes="lede" Text="Nothing picked yet." />
+            </StackPanel>
+          </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto">
+        <WrapPanel Name="GestureList" Orientation="Horizontal" />
+      </ScrollViewer>
+    </Grid>
+
+    </Panel>
+  </DockPanel>
+</Window>

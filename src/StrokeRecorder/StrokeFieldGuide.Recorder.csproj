@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A tool, not part of the guide. It records strokes from a real tablet so that Parts IV
+    and V have something to be about, and it is the first thing here to put WinPenKit and
+    this guide's surfaces together in one window.
+
+    Modelled on the browser recorder in StrokeRenderingFieldGuide, whose five-step shape is
+    the part worth keeping: check the pen first, choose a brief, record, review, then name
+    it. What is different is underneath. A browser reports a normalised pressure and calls
+    every device a pointer; WinPenKit reports raw counts, says which API produced them, and
+    can be asked what the device's full scale is. That last one is the whole reason this
+    exists rather than a canvas and a save button.
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <RootNamespace>StrokeFieldGuide.Recorder</RootNamespace>
+    <AssemblyName>StrokeFieldGuide.Recorder</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Win32" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Skia" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.HarfBuzz" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="$(AvaloniaVersion)" />
+    <PackageReference Include="SkiaSharp" Version="$(SkiaSharpVersion)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\StrokeFieldGuide\StrokeFieldGuide.csproj" />
+    <ProjectReference Include="..\StrokeFieldGuide.Canvas\StrokeFieldGuide.Canvas.csproj" />
+    <ProjectReference Include="..\..\..\WinPenKit\WinPenKit.Avalonia\WinPenKit.Avalonia.csproj" />
+  </ItemGroup>
+
+</Project>
