@@ -30,8 +30,11 @@ namespace StrokeFieldGuide.Recorder;
 /// </remarks>
 public sealed class Gauges : Control
 {
-    private const double Radius = 62;
-    private const double Gap = 26;
+    private readonly bool _terse;
+    private readonly double _radius;
+    private readonly double _gap;
+    private readonly double _caption;
+    private readonly double _value;
 
     /// <summary>The widest lean an EMR pen senses, and so the edge of the tilt dial.</summary>
     /// <remarks>
@@ -68,7 +71,27 @@ public sealed class Gauges : Control
     /// </remarks>
     private readonly List<Turn> _rolled = [];
 
-    public Gauges() => Height = 2 * Radius + 44;
+    /// <param name="radius">
+    /// How big each dial is. Small enough to sit in a row of readouts is a different thing
+    /// from big enough to check a pen against, and both are wanted -- the recording step
+    /// needs these more than the probe does and has less room to give them, because what it
+    /// gives them it takes off the pad.
+    /// </param>
+    public Gauges(double radius = 62)
+    {
+        _radius = radius;
+
+        // Small enough to sit in a row of readouts is small enough that the captions are
+        // wider than the dials, so at that size they set the spacing rather than the circles
+        // do. Left to the dials it read "0° of 60upright: no dire...reported, turned".
+        _terse = radius < 40;
+        _gap = _terse ? 34 : radius * 0.42;
+        _caption = Math.Max(9, radius * 0.18);
+        _value = Math.Max(10, radius * 0.19);
+
+        Width = 6 * _radius + 2 * _gap + 12;
+        Height = 2 * _radius + 2 * _value + 2 * _caption + 12;
+    }
 
     /// <summary>How far the pen has rolled in total, which may be more than a circle.</summary>
     public double TotalRoll => _rolled.Count < 2 ? 0 : Turn.Total(_rolled);
@@ -104,12 +127,12 @@ public sealed class Gauges : Control
 
     public override void Render(DrawingContext context)
     {
-        var y = Radius + 6;
-        var x = Radius + 6;
+        var y = _radius + 6;
+        var x = _radius + 6;
 
         Tilt(context, new Point(x, y));
-        Nib(context, new Point(x + 2 * Radius + Gap, y));
-        Barrel(context, new Point(x + 4 * Radius + 2 * Gap, y));
+        Nib(context, new Point(x + 2 * _radius + _gap, y));
+        Barrel(context, new Point(x + 4 * _radius + 2 * _gap, y));
     }
 
     /// <summary>
@@ -123,21 +146,21 @@ public sealed class Gauges : Control
     /// </remarks>
     private void Tilt(DrawingContext context, Point centre)
     {
-        context.DrawEllipse(Paper, Edge, centre, Radius, Radius);
+        context.DrawEllipse(Paper, Edge, centre, _radius, _radius);
 
         foreach (var ring in new[] { 20.0, 40.0 })
         {
-            var at = Radius * ring / WidestLean;
+            var at = _radius * ring / WidestLean;
 
             context.DrawEllipse(null, Hairline, centre, at, at);
         }
 
-        context.DrawLine(Hairline, new Point(centre.X - Radius, centre.Y), new Point(centre.X + Radius, centre.Y));
-        context.DrawLine(Hairline, new Point(centre.X, centre.Y - Radius), new Point(centre.X, centre.Y + Radius));
+        context.DrawLine(Hairline, new Point(centre.X - _radius, centre.Y), new Point(centre.X + _radius, centre.Y));
+        context.DrawLine(Hairline, new Point(centre.X, centre.Y - _radius), new Point(centre.X, centre.Y + _radius));
 
         // Labelled, because the whole of this correction was about which way the dial faces.
-        Write(context, "N", centre.X, centre.Y - Radius - 1, 10, Label);
-        Write(context, "E", centre.X + Radius + 7, centre.Y - 7, 10, Label);
+        Write(context, "N", centre.X, centre.Y - _radius - 1, _caption, Label);
+        Write(context, "E", centre.X + _radius + _caption * 0.7, centre.Y - _caption, _caption, Label);
 
         if (_reporting)
         {
@@ -146,14 +169,15 @@ public sealed class Gauges : Control
             // pen east put the dot due south, a quarter turn out, because an azimuth was
             // being read as an angle from the x axis rather than as the bearing it is.
             var leaning = Leaning.From(_lean, _azimuth);
-            var scale = Radius / WidestLean;
+            var scale = _radius / WidestLean;
             var at = new Point(centre.X + leaning.Across * scale, centre.Y + leaning.Down * scale);
 
             context.DrawLine(Needle, centre, at);
-            context.DrawEllipse(Live, null, at, 5, 5);
+            context.DrawEllipse(Live, null, at, _radius * 0.08 + 2, _radius * 0.08 + 2);
         }
 
-        Caption(context, centre, "lean", _reporting ? $"{_lean:F0}° of {WidestLean:F0}" : "—");
+        Caption(context, centre, "lean", _reporting ? $"{_lean:F0}° of {WidestLean:F0}" : "—",
+            _reporting ? $"{_lean:F0}°" : "—");
     }
 
     /// <summary>
@@ -167,7 +191,7 @@ public sealed class Gauges : Control
     /// </remarks>
     private void Nib(DrawingContext context, Point centre)
     {
-        context.DrawEllipse(Paper, Edge, centre, Radius, Radius);
+        context.DrawEllipse(Paper, Edge, centre, _radius, _radius);
 
         if (_reporting)
         {
@@ -188,7 +212,7 @@ public sealed class Gauges : Control
                            Matrix.CreateRotation(along.Radians)
                            * Matrix.CreateTranslation(centre.X, centre.Y)))
                 {
-                    context.DrawEllipse(Ink, Nibline, new Point(0, 0), Radius - 12, (Radius - 12) * 0.26);
+                    context.DrawEllipse(Ink, Nibline, new Point(0, 0), _radius * 0.8, _radius * 0.8 * 0.26);
                 }
             }
             else
@@ -197,18 +221,19 @@ public sealed class Gauges : Control
                 // and nothing is: the pen is upright and a nib driven by the lean has no
                 // angle to be at. The empty ring says "no direction" where the blob said
                 // "error".
-                context.DrawEllipse(null, Hairline, centre, Radius - 12, Radius - 12);
+                context.DrawEllipse(null, Hairline, centre, _radius * 0.8, _radius * 0.8);
             }
 
-            Caption(context, centre, "nib, turned to the lean",
-                turned is null
-                    ? "upright: no direction"
-                    : $"bearing {Leaning.From(_lean, _azimuth).Azimuth!.Value.Degrees:F0}°");
+            var bearing = Leaning.From(_lean, _azimuth).Azimuth;
+
+            Caption(context, centre, _terse ? "nib" : "nib, turned to the lean",
+                turned is null ? "upright: no direction" : $"bearing {bearing!.Value.Degrees:F0}°",
+                turned is null ? "upright" : $"{bearing!.Value.Degrees:F0}°");
 
             return;
         }
 
-        Caption(context, centre, "nib, turned to the lean", "—");
+        Caption(context, centre, _terse ? "nib" : "nib, turned to the lean", "—");
     }
 
     /// <summary>
@@ -222,29 +247,30 @@ public sealed class Gauges : Control
     /// </remarks>
     private void Barrel(DrawingContext context, Point centre)
     {
-        context.DrawEllipse(Paper, Edge, centre, Radius, Radius);
+        context.DrawEllipse(Paper, Edge, centre, _radius, _radius);
 
         for (var tick = 0; tick < 12; tick++)
         {
             var at = Turn.At(tick * 30).Radians;
-            var inner = tick % 3 == 0 ? Radius - 10 : Radius - 5;
+            var inner = tick % 3 == 0 ? _radius * 0.84 : _radius * 0.92;
 
             context.DrawLine(Hairline,
                 new Point(centre.X + Math.Cos(at) * inner, centre.Y + Math.Sin(at) * inner),
-                new Point(centre.X + Math.Cos(at) * Radius, centre.Y + Math.Sin(at) * Radius));
+                new Point(centre.X + Math.Cos(at) * _radius, centre.Y + Math.Sin(at) * _radius));
         }
 
         if (_reporting)
         {
             var at = _roll.Radians;
-            var rim = new Point(centre.X + Math.Cos(at) * (Radius - 6), centre.Y + Math.Sin(at) * (Radius - 6));
+            var rim = new Point(centre.X + Math.Cos(at) * _radius * 0.9, centre.Y + Math.Sin(at) * _radius * 0.9);
 
             context.DrawLine(Needle, centre, rim);
-            context.DrawEllipse(Live, null, rim, 6, 6);
+            context.DrawEllipse(Live, null, rim, _radius * 0.09 + 2, _radius * 0.09 + 2);
 
             // The device's own number in the caption, because that is what lands in the file
             // and what a reader will see if they open one. The needle is the hand's.
-            Caption(context, centre, "barrel", $"{_twist.Degrees:F0}° reported, turned {TotalRoll:F0}°");
+            Caption(context, centre, "barrel", $"{_twist.Degrees:F0}° reported, turned {TotalRoll:F0}°",
+                $"turned {TotalRoll:F0}°");
 
             return;
         }
@@ -252,10 +278,18 @@ public sealed class Gauges : Control
         Caption(context, centre, "barrel", "—");
     }
 
-    private static void Caption(DrawingContext context, Point centre, string what, string value)
+    /// <param name="brief">
+    /// What the caption says where there is no room for the rest of it. The long form is not
+    /// shortened automatically because what to drop is a judgement: on the barrel it is the
+    /// reported figure that goes and the total that stays, and no rule would know that.
+    /// </param>
+    private void Caption(DrawingContext context, Point centre, string what, string value,
+                         string? brief = null)
     {
-        Write(context, what, centre.X, centre.Y + Radius + 4, 11, Label);
-        Write(context, value, centre.X, centre.Y + Radius + 19, 12, Ink);
+        Write(context, what, centre.X, centre.Y + _radius + 3, _caption, Label);
+
+        Write(context, _terse ? brief ?? value : value,
+            centre.X, centre.Y + _radius + 3 + _caption + 3, _value, Ink);
     }
 
     private static void Write(DrawingContext context, string text, double x, double y,

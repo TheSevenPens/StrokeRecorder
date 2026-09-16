@@ -62,26 +62,48 @@
       <Setter Property="Foreground" Value="#2B2B28" />
     </Style>
 
-    <!-- One gesture, offered. A ToggleButton so the chosen one stays looking chosen. -->
+    <!-- One gesture, offered. A ToggleButton so the chosen one stays looking chosen.
+         Everything below is set on the ContentPresenter rather than on the button, because
+         that is where the theme sets its own: rules put on the button were overridden in the
+         checked state, which took the border away and left the chosen card looking disabled
+         rather than chosen. -->
     <Style Selector="ToggleButton.gesture">
-      <Setter Property="Background" Value="#FFFFFF" />
-      <Setter Property="BorderBrush" Value="#E2E2DC" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="CornerRadius" Value="4" />
-      <Setter Property="Padding" Value="14" />
+      <Setter Property="Padding" Value="0" />
       <Setter Property="Margin" Value="0,0,12,12" />
       <!-- Narrow enough that two sit side by side in the space this step leaves, and the
            panel falls back to one column rather than clipping when the window is small. -->
       <Setter Property="Width" Value="296" />
       <Setter Property="HorizontalContentAlignment" Value="Stretch" />
     </Style>
-    <Style Selector="ToggleButton.gesture:checked">
+
+    <Style Selector="ToggleButton.gesture /template/ ContentPresenter">
+      <Setter Property="Background" Value="#FFFFFF" />
+      <Setter Property="BorderBrush" Value="#E2E2DC" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="14" />
+    </Style>
+    <Style Selector="ToggleButton.gesture:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#FAF8F3" />
+      <Setter Property="BorderBrush" Value="#BDBDB6" />
+    </Style>
+
+    <!-- The chosen one: a warm ground against the white of the rest, and a border twice as
+         heavy in the ink colour. The padding gives back what the border takes, so the card
+         does not change size: growing by a pixel was the old signal, and nobody saw it. -->
+    <Style Selector="ToggleButton.gesture:checked /template/ ContentPresenter">
+      <Setter Property="Background" Value="#F0E7D2" />
       <Setter Property="BorderBrush" Value="#2B2B28" />
       <Setter Property="BorderThickness" Value="2" />
       <Setter Property="Padding" Value="13" />
     </Style>
-    <Style Selector="ToggleButton.gesture:checked /template/ ContentPresenter">
-      <Setter Property="Background" Value="#FFFFFF" />
+    <Style Selector="ToggleButton.gesture:checked:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#EFE3C7" />
+      <Setter Property="BorderBrush" Value="#2B2B28" />
+    </Style>
+    <Style Selector="ToggleButton.gesture:pressed /template/ ContentPresenter">
+      <Setter Property="Background" Value="#EFE3C7" />
+      <Setter Property="BorderBrush" Value="#2B2B28" />
     </Style>
   </Window.Styles>
 
@@ -133,13 +155,33 @@
         <TextBlock Text="First, check the pen is reporting" FontSize="18"
                    FontWeight="SemiBold" TextWrapping="Wrap" />
 
-        <TextBlock Classes="lede"
-                   Text="A session is already open on the backend below. Hover over the strip and press down: it draws, and the width follows pressure, so you can see what this machine is actually being told. A minute here saves recording a trace that turns out to be a mouse." />
-
         <StackPanel Spacing="4">
           <TextBlock Text="Backend" Classes="label" />
           <ComboBox Name="Backends" HorizontalAlignment="Stretch" />
-          <TextBlock Name="BackendWorth" Classes="lede" FontSize="12" Margin="0,4,0,0" />
+          <!-- Shown only when a backend cannot be opened. What one is worth is on its card
+               in the list; repeating it here was a paragraph nobody read twice. -->
+          <TextBlock Name="BackendWorth" Classes="lede" FontSize="12" Margin="0,4,0,0"
+                     IsVisible="False" />
+        </StackPanel>
+
+        <StackPanel Spacing="4">
+          <TextBlock Text="Nib size" Classes="label" />
+          <ComboBox Name="Size" HorizontalAlignment="Stretch" />
+        </StackPanel>
+
+        <CheckBox Name="Round" Content="Round nib, ignoring the lean" />
+
+        <!-- The same two fields as the save step, editing the same thing. Here because they
+             are the answer to "which tablet is this", which a reader wants to see on the step
+             that is about the tablet, and not only when saving. -->
+        <StackPanel Spacing="4">
+          <TextBlock Text="Tablet" Classes="label" />
+          <TextBox Name="ProbeTablet" Watermark="Wacom Cintiq 24" />
+        </StackPanel>
+
+        <StackPanel Spacing="4">
+          <TextBlock Text="Driver" Classes="label" />
+          <TextBox Name="ProbeDriver" Watermark="Wacom driver 6.4.14-1" />
         </StackPanel>
 
         <StackPanel Orientation="Horizontal" Spacing="8">
@@ -168,7 +210,11 @@
              number, and can do it from a notch that moves. -->
         <Border DockPanel.Dock="Bottom" Background="#FFFFFF" BorderBrush="#E2E2DC"
                 BorderThickness="1" CornerRadius="4" Padding="14,10" Margin="0,14,0,0">
-          <Panel Name="GaugeHost" />
+          <Grid ColumnDefinitions="Auto,*">
+            <Panel Name="GaugeHost" />
+            <Panel Name="TraceHost" Grid.Column="1" Margin="16,0,0,0"
+                   VerticalAlignment="Center" />
+          </Grid>
         </Border>
 
         <Border Background="#FFFFFF" BorderBrush="#D8D8D2" BorderThickness="1"
@@ -277,10 +323,33 @@
           <TextBlock Classes="lede" FontSize="12"
                      Text="The recording starts when the tip touches down and ends when it lifts, so there is nothing to press at either end. The guide on the pad is there to follow and is not part of what is recorded." />
 
+          <Border Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
+                  CornerRadius="4" Padding="12,8">
+            <StackPanel Spacing="2">
+              <TextBlock Name="Clock" Text="0.00 s" FontSize="30" FontWeight="SemiBold"
+                         FontFamily="Consolas,Menlo,monospace" />
+              <TextBlock Name="Wanted" Classes="label" Text="" />
+            </StackPanel>
+          </Border>
+
+          <CheckBox Name="TakeRound" Content="Round nib, ignoring the lean" />
+
+          <StackPanel Spacing="4">
+            <TextBlock Text="Nib size" Classes="label" />
+            <ComboBox Name="TakeSize" HorizontalAlignment="Stretch" />
+            <!-- Large is the point of this: a wobble of a tenth of the range is a fraction of
+                 a pixel on a small nib and plainly visible on a wide one. -->
+            <TextBlock Classes="lede" FontSize="11" Margin="0,2,0,0"
+                       Text="A light-pressure wobble is invisible at 10 and obvious at 300." />
+          </StackPanel>
+
           <StackPanel Orientation="Horizontal" Spacing="8">
             <Button Name="Arm" Content="Arm" />
             <Button Name="Again" Content="Throw it away" IsEnabled="False" />
           </StackPanel>
+
+          <TextBlock Classes="lede" FontSize="11"
+                     Text="Space arms and disarms. Finishing a stroke arms the next one, and the take you have is kept until you actually start another." />
 
           <Border Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
                   CornerRadius="4" Padding="12">
@@ -313,17 +382,13 @@
           <TextBlock Text="Next, decide what you are recording" FontSize="18"
                      FontWeight="SemiBold" TextWrapping="Wrap" />
 
-          <TextBlock Classes="lede"
-                     Text="Pick one. Each of these exists to show something a different one cannot, and what that is stays with the recording, so a trace can still be read months later by somebody who was not holding the pen." />
-
-          <TextBlock Classes="lede"
-                     Text="The first two are the same line at different speeds. That pairing is the useful one: anything that differs between them is about how fast the hand moved and cannot be about the shape it moved through." />
-
           <Border Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
                   CornerRadius="4" Padding="12">
             <StackPanel Spacing="6">
-              <TextBlock Text="What this one is for" Classes="label" />
-              <TextBlock Name="Wants" Classes="lede" Text="Nothing picked yet." />
+              <TextBlock Name="Picked" Text="Nothing picked yet" FontSize="16"
+                         FontWeight="SemiBold" TextWrapping="Wrap" />
+              <TextBlock Text="what it is for" Classes="label" />
+              <TextBlock Name="Wants" Classes="lede" Text="" />
             </StackPanel>
           </Border>
         </StackPanel>

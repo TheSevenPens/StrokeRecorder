@@ -1,6 +1,8 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
+using Avalonia.Input;
+using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
@@ -43,7 +45,46 @@ public partial class MainWindow : Window
     /// </remarks>
     private const int PollMilliseconds = 16;
 
+    /// <summary>
+    /// The sizes offered, rather than a free slider.
+    /// </summary>
+    /// <remarks>
+    /// Because the useful ones are far apart. A wobble of a tenth of the range is a fraction
+    /// of a pixel on a ten-wide nib and plainly visible on a three-hundred-wide one, so what
+    /// a reader wants is to jump between orders of magnitude rather than to tune a number.
+    /// </remarks>
+    private static readonly double[] Sizes = [5, 10, 25, 50, 100, 200, 300, 400];
+
+    private Remembered _remembered = Remembered.Read();
+
+    private double _diameter = 26;
+
+    /// <summary>
+    /// Whether the nib ignores the lean and stays a circle.
+    /// </summary>
+    /// <remarks>
+    /// Asked for while testing pressure at a nib four hundred wide, where the shape was the
+    /// problem: a chisel that long renders a stroke whose weight changes with the hand's
+    /// angle, and that movement sits on top of the one being looked for. A circle has one
+    /// number and shows it.
+    /// </remarks>
+    private bool _round;
+
+    private readonly PressureTrace _trace = new(0, 92);
+    private readonly PressureTrace _takeTrace = new(230, 74);
+
     private readonly Gauges _gauges = new();
+
+    /// <summary>
+    /// The same dials on the recording step, small enough to sit in the row of readouts.
+    /// </summary>
+    /// <remarks>
+    /// The step that needs them most had none. A reader can check a pen against the big ones
+    /// and then go and record with nothing to watch, which is the wrong way round: the probe
+    /// is where a hand is free, and the take is where it matters whether the barrel is where
+    /// it was meant to be. Smaller here, because what they take they take off the pad.
+    /// </remarks>
+    private readonly Gauges _takeGauges = new(26);
     private readonly PenPad _strip;
     private readonly PenPad _pad;
     private readonly PenPad _replay;
@@ -107,6 +148,64 @@ public partial class MainWindow : Window
         this.FindControl<Panel>("StripHost")!.Children.Insert(0, _strip);
 
         this.FindControl<Panel>("GaugeHost")!.Children.Add(_gauges);
+        this.FindControl<Panel>("TraceHost")!.Children.Add(_trace);
+
+        _diameter = _remembered.Diameter;
+
+        foreach (var name in new[] { "Round", "TakeRound" })
+        {
+            var box = this.FindControl<CheckBox>(name)!;
+
+            box.IsCheckedChanged += (_, _) =>
+            {
+                _round = box.IsChecked == true;
+
+                foreach (var other in new[] { "Round", "TakeRound" })
+                {
+                    this.FindControl<CheckBox>(other)!.IsChecked = _round;
+                }
+            };
+        }
+
+        // One tablet and one driver, edited from either step. The save step asks because that
+        // is where a file gets its name; the probe step asks because that is the step about
+        // the tablet, and a reader wanting to check which one this is should not have to walk
+        // to the end of the wizard to see.
+        foreach (var name in new[] { "ProbeTablet", "ProbeDriver", "Tablet", "Driver" })
+        {
+            var box = this.FindControl<TextBox>(name)!;
+
+            box.TextChanged += (_, _) => Named(name.Contains("Tablet"), box.Text ?? "");
+        }
+
+        this.FindControl<TextBox>("ProbeTablet")!.Text = _remembered.Tablet;
+        this.FindControl<TextBox>("ProbeDriver")!.Text = _remembered.Driver;
+
+        foreach (var name in new[] { "Size", "TakeSize" })
+        {
+            var sizes = this.FindControl<ComboBox>(name)!;
+
+            sizes.ItemsSource = Sizes.Select(size => $"{size:F0} px").ToList();
+            // Nearest offered, so a remembered size that is no longer on the list -- or a
+            // default that never was -- picks something sensible rather than the smallest.
+            sizes.SelectedIndex = Array.IndexOf(Sizes,
+                Sizes.OrderBy(size => Math.Abs(size - _diameter)).First());
+            sizes.SelectionChanged += (_, _) =>
+            {
+                if (sizes.SelectedIndex < 0) return;
+
+                _diameter = Sizes[sizes.SelectedIndex];
+
+                // Both choosers show the one size, because there is one brush.
+                foreach (var other in new[] { "Size", "TakeSize" })
+                {
+                    this.FindControl<ComboBox>(other)!.SelectedIndex = sizes.SelectedIndex;
+                }
+
+                _remembered = _remembered with { Diameter = _diameter };
+                _remembered.Write();
+            };
+        }
 
         // Step three's own pad. Two of them rather than one moved between panels, because
         // they hold different things for different lengths of time: the strip is scribbled
@@ -115,7 +214,7 @@ public partial class MainWindow : Window
         this.FindControl<Panel>("ReviewHost")!.Children.Add(_replay);
 
         _pad = new PenPad(1200, 700);
-        _pad.Grew += (_, _) => DrawGuide();
+        _pad.Grew += (_, _) => Regrown();
         this.FindControl<Panel>("PadHost")!.Children.Add(_pad);
 
         foreach (var readout in All)
@@ -147,6 +246,10 @@ public partial class MainWindow : Window
 
         BuildGestures();
 
+        // First in the row, so the dials sit beside the figures rather than under them.
+        this.FindControl<WrapPanel>("TakeReadouts")!.Children.Add(_takeGauges);
+        this.FindControl<WrapPanel>("TakeReadouts")!.Children.Add(_takeTrace);
+
         foreach (var readout in Taken)
         {
             this.FindControl<WrapPanel>("TakeReadouts")!.Children.Add(readout.Build().Visual);
@@ -172,6 +275,9 @@ public partial class MainWindow : Window
         this.FindControl<Button>("Next")!.Click += (_, _) => GoTo(_step + 1);
 
         GoTo(1);
+
+        // Tunnelled, so the canvas cannot take the space bar first.
+        AddHandler(KeyDownEvent, Pressed, RoutingStrategies.Tunnel);
 
         _poll = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(PollMilliseconds) };
         _poll.Tick += (_, _) => Drain();
@@ -253,10 +359,15 @@ public partial class MainWindow : Window
 
     private bool Answered(int step) => step switch
     {
-        // A session that is open and has reported at least one point. Open is not enough:
-        // the whole of step one is the difference between a backend that answers and one
-        // that merely opened, and walking on at "open" throws that away.
-        1 => _session is not null && _seen > 0,
+        // Nothing. Step one used to require a point before it would let anybody past, on
+        // the grounds that the difference between a backend that answers and one that merely
+        // opened is the whole of what it is for. True, and it does not follow that the step
+        // should refuse: a reader using the same tablet for the twentieth time knows it
+        // answers, and making them prove it again is a toll rather than a check.
+        //
+        // The foot still says whether anything has been reported, so the fact is there for
+        // anybody who wants it and in the way of nobody who does not.
+        1 => true,
         2 => _gesture is not null,
 
         // A take with something in it. One reading counts, because a tap is one reading and
@@ -318,7 +429,7 @@ public partial class MainWindow : Window
             3 when _take is null => $"{_gesture?.Label}. Arm, then draw.",
             3 when _capture == Capture.Drawing => "Recording. Lift the pen to finish.",
             3 when _capture == Capture.Taken =>
-                $"{_take!.Describe()}. Review is the next step, and is not built yet.",
+                $"{_take!.Describe()}. Next reads it back to you.",
             3 => "Armed. Waiting for the tip.",
 
             4 when _take is null => "Nothing to review.",
@@ -400,12 +511,32 @@ public partial class MainWindow : Window
             if (child is ToggleButton button) button.IsChecked = ReferenceEquals(button.Tag, gesture);
         }
 
+        this.FindControl<TextBlock>("Picked")!.Text = gesture.Label;
         this.FindControl<TextBlock>("Wants")!.Text = gesture.Wants;
 
         Refresh();
     }
 
     private Readout[] Taken => [_took, _lasted, _takePressure];
+
+    /// <summary>The nib this window draws with, and shows a cursor for.</summary>
+    /// <remarks>
+    /// <para>
+    /// One place, because a cursor that is not the brush is worse than no cursor: it says the
+    /// mark will be one thing and the mark is another, and a reader trusts the picture over
+    /// the ink for as long as it takes to notice.
+    /// </para>
+    /// <para>
+    /// A chisel held to the lean rather than a circle, because a circle has nothing to show
+    /// about how the pen is held and this window exists to show that. It also means the ink
+    /// exercises the control the guide has just grown, on a real hand, which no fixture can.
+    /// </para>
+    /// </remarks>
+    private Nib Brush(int fullScale) => new(
+        _diameter, SKColors.Black.WithAlpha(0xD0), 0.25, Buildup.PerStamp,
+        new Width(Math.Min(0.5, _diameter / 20), _diameter, (uint)Math.Max(1, fullScale)),
+        SpacedBy.Diameters,
+        Nib: _round ? null : new StrokeFieldGuide.Brushes.Nib(0.3, 0, Held.ToTheLean));
 
     // ── step three ──────────────────────────────────────────────────────────────
 
@@ -433,6 +564,27 @@ public partial class MainWindow : Window
     private void Record(PenPoint point, IPenSession session)
     {
         var reading = Reported(point);
+
+        // Only over the pad. A tablet reports the pen wherever it is, so without this the tap
+        // that presses Arm is itself recorded as a stroke -- it armed, took a two-reading
+        // take from the same tap, and read as the button un-arming itself.
+        //
+        // A pen that wanders off the pad mid-stroke ends the take, which is the same thing
+        // the tip lifting does and is the honest reading of it: what happened after that is
+        // not on this drawing.
+        if (!_pad.Covers(reading.X, reading.Y))
+        {
+            if (_capture == Capture.Drawing)
+            {
+                _take!.EndedBy = "the pen left the pad";
+                _capture = Capture.Taken;
+                _haveLast = false;
+
+                Stage();
+            }
+
+            return;
+        }
 
         // Written as ifs rather than a switch on purpose. The first version used `goto case
         // Capture.Drawing` to fall from the first contact into the collecting branch, and C#
@@ -462,6 +614,8 @@ public partial class MainWindow : Window
                 _took.Saw(_take.Count);
                 _lasted.Saw(_take.Milliseconds);
                 _takePressure.Saw(reading.Pressure);
+
+                Tick();
             }
             else
             {
@@ -470,8 +624,40 @@ public partial class MainWindow : Window
                 _haveLast = false;
             }
         }
+        else if (_capture == Capture.Taken && reading.InContact)
+        {
+            // Drawing again after a take starts the next one, with no button in between.
+            // Pressing Arm for every stroke is the wrong shape for what somebody recording
+            // actually does, which is draw, look, draw again.
+            //
+            // The previous take is held right up to this moment rather than thrown away when
+            // the last one finished, so a take is only lost by starting another -- and a
+            // reader who wants to keep it presses Next before putting the pen down.
+            Restart(session);
+
+            _take!.Add(reading);
+
+            Lay(_pad, point, session.MaxPressure, _take.Placed);
+        }
 
         Stage();
+    }
+
+    /// <summary>Begins a take where one has just finished, on the same gesture.</summary>
+    private void Restart(IPenSession session)
+    {
+        foreach (var readout in Taken) readout.Forget();
+
+        _pad.Clear();
+        DrawGuide();
+
+        _take = new Take(_gesture!, session.Api, session.MaxPressure, _pad.ForPen())
+        {
+            Conventions = session.Conventions.ToString() ?? "",
+        };
+
+        _capture = Capture.Drawing;
+        _haveLast = false;
     }
 
     private void ArmTake()
@@ -481,6 +667,8 @@ public partial class MainWindow : Window
         _haveLast = false;
 
         foreach (var readout in Taken) readout.Forget();
+
+        _takeGauges.Forget();
 
         _pad.Clear();
         DrawGuide();
@@ -515,11 +703,53 @@ public partial class MainWindow : Window
 
         foreach (var readout in Taken) readout.Forget();
 
+        _takeGauges.Forget();
+
         _pad.Clear();
         DrawGuide();
 
         Stage();
     }
+
+    /// <summary>
+    /// How long the stroke has been going, and how long this gesture asks for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Asked for, and fair: this window tells a reader to draw for three or four seconds and
+    /// then gives them no way to know how long they drew for until the stroke is over. A
+    /// stopwatch turns "was that about right" into something answerable while it still can be
+    /// answered.
+    /// </para>
+    /// <para>
+    /// Counted on the pen's own clock rather than on a wall clock, so it agrees with the
+    /// duration the file will carry. It therefore only moves when readings arrive, which at
+    /// two hundred and forty a second is often enough to read as running.
+    /// </para>
+    /// </remarks>
+    private void Tick()
+    {
+        var seconds = _capture is Capture.Drawing or Capture.Taken && _take is not null
+            ? _take.Milliseconds / 1000
+            : 0;
+
+        this.FindControl<TextBlock>("Clock")!.Text = $"{seconds:F2} s";
+
+        this.FindControl<TextBlock>("Wanted")!.Text = _gesture is null
+            ? ""
+            : Asks(_gesture) is { } pace
+                ? $"{_gesture.Label} asks for {pace}"
+                : $"{_gesture.Label} asks for no particular pace";
+    }
+
+    /// <summary>What a gesture asks of the clock, where it asks anything.</summary>
+    private static string? Asks(Gesture gesture) => gesture.Id switch
+    {
+        "slow-diagonal" => "three or four seconds",
+        "fast-flick" => "under half a second",
+        "slow-arc" => "about three seconds",
+        _ => null,
+    };
 
     /// <summary>Puts the words and the buttons where the take has got to.</summary>
     private void Stage()
@@ -555,6 +785,7 @@ public partial class MainWindow : Window
         this.FindControl<Button>("Arm")!.IsEnabled = _capture is Capture.Idle or Capture.Taken;
         this.FindControl<Button>("Again")!.IsEnabled = _capture is Capture.Taken;
 
+        Tick();
         Refresh();
     }
 
@@ -567,6 +798,34 @@ public partial class MainWindow : Window
     /// the stroke on its own. Review does not try -- it redraws the take from the readings,
     /// which is the only honest way to look at a recording anyway.
     /// </remarks>
+    /// <summary>
+    /// Puts the pad back the way it was, on the surface that has just replaced it.
+    /// </summary>
+    /// <remarks>
+    /// Growing keeps what was drawn, which is right for ink and wrong for the guide: the
+    /// guide is placed in fractions of the surface, so the copied one sits where it belonged
+    /// on the smaller pad and a freshly drawn one sits where it belongs on this pad. Two
+    /// dashed lines, a hand's breadth apart, and both of them look deliberate.
+    /// <para>
+    /// So everything is redrawn rather than added to. The take survives because it is data:
+    /// what is on the pad has always been a picture of it rather than the thing itself.
+    /// </para>
+    /// </remarks>
+    private void Regrown()
+    {
+        _pad.Clear();
+
+        DrawGuide();
+
+        if (_take?.Stroke is not { } stroke) return;
+
+        var brush = Brush(_take.FullScalePressure);
+
+        brush.Draw(_pad.Surface, _take.Placed, stroke);
+
+        _pad.Redraw();
+    }
+
     private void DrawGuide()
     {
         if (_gesture?.Shape is not { } shape) return;
@@ -635,10 +894,7 @@ public partial class MainWindow : Window
 
         if (_take?.Stroke is { } stroke)
         {
-            var brush = new Nib(
-                26, SKColors.Black.WithAlpha(0xD0), 0.25, Buildup.PerStamp,
-                new Width(0.5, 26, (uint)Math.Max(1, _take.FullScalePressure)),
-                SpacedBy.Diameters);
+            var brush = Brush(_take.FullScalePressure);
 
             // Through the transform the take was placed with, not through this pad's own.
             // The take is a finished thing and is replayed as it was drawn, whatever has
@@ -711,11 +967,65 @@ public partial class MainWindow : Window
         _suggested = "";
 
         this.FindControl<TextBox>("FileName")!.Text = "";
+        this.FindControl<TextBox>("Tablet")!.Text = _take.Tablet.Length > 0
+            ? _take.Tablet : _remembered.Tablet;
+
+        this.FindControl<TextBox>("Driver")!.Text = _take.Driver.Length > 0
+            ? _take.Driver : _remembered.Driver;
+
         this.FindControl<TextBox>("Intent")!.Text = _take.Intent;
         this.FindControl<TextBlock>("Folder")!.Text = TakesFolder;
 
         Named();
         Refresh();
+    }
+
+    /// <summary>
+    /// One name, typed anywhere, kept everywhere and remembered.
+    /// </summary>
+    /// <remarks>
+    /// Guarded against its own echo: setting the other box raises its change event, which
+    /// would call back here and set this one, and the two would answer each other until the
+    /// stack ran out.
+    /// </remarks>
+    private bool _naming;
+
+    private void Named(bool tablet, string value)
+    {
+        if (_naming) return;
+
+        _naming = true;
+
+        try
+        {
+            value = value.Trim();
+
+            foreach (var name in tablet ? new[] { "ProbeTablet", "Tablet" }
+                                        : ["ProbeDriver", "Driver"])
+            {
+                var box = this.FindControl<TextBox>(name)!;
+
+                if ((box.Text ?? "") != value) box.Text = value;
+            }
+
+            if (_take is not null)
+            {
+                if (tablet) _take.Tablet = value;
+                else _take.Driver = value;
+            }
+
+            _remembered = tablet
+                ? _remembered with { Tablet = value }
+                : _remembered with { Driver = value };
+
+            _remembered.Write();
+        }
+        finally
+        {
+            _naming = false;
+        }
+
+        if (_step == 5) Named();
     }
 
     /// <summary>
@@ -796,6 +1106,11 @@ public partial class MainWindow : Window
         {
             _saved = Trace.Write(_take, TakesFolder, name);
 
+            // Kept only once a take has been written with them, so a half-typed name in an
+            // abandoned session is not what the next launch offers.
+            _remembered = _remembered with { Tablet = _take.Tablet, Driver = _take.Driver };
+            _remembered.Write();
+
             this.FindControl<TextBlock>("SaveState")!.Text = _take.Named
                 ? $"Saved to {_saved}"
                 : $"Saved to {_saved}, with the tablet and the driver unnamed.";
@@ -829,6 +1144,48 @@ public partial class MainWindow : Window
 
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
 
+    /// <summary>
+    /// Delete and backspace wipe the strip, on the step where there is one.
+    /// </summary>
+    /// <remarks>
+    /// Both, because which of them means "get rid of that" is a habit rather than a rule and
+    /// a reader checking a pen should not have to find out which habit this window has.
+    /// <para>
+    /// Not while a text box has the focus. Backspace there means backspace, and a window that
+    /// wiped a drawing because somebody corrected a tablet's name would deserve what it got.
+    /// </para>
+    /// </remarks>
+    private void Pressed(object? sender, KeyEventArgs e)
+    {
+        if (FocusManager?.GetFocusedElement() is TextBox) return;
+
+        // Space arms and disarms, so a reader recording one stroke after another never has to
+        // put the pen down and find a button. It is taken before the canvas sees it, because
+        // a canvas holds the space bar for hand-panning and would mark it handled.
+        if (e.Key == Key.Space && _step == 3)
+        {
+            if (_capture is Capture.Armed) Discard();
+            else ArmTake();
+
+            e.Handled = true;
+
+            return;
+        }
+
+        if (e.Key is not (Key.Delete or Key.Back)) return;
+
+        if (_step == 1)
+        {
+            Wipe();
+            e.Handled = true;
+        }
+        else if (_step == 3 && _capture is Capture.Taken)
+        {
+            Discard();
+            e.Handled = true;
+        }
+    }
+
     private BackendChoice? Chosen =>
         this.FindControl<ComboBox>("Backends")!.SelectedItem as BackendChoice;
 
@@ -836,12 +1193,15 @@ public partial class MainWindow : Window
     {
         var chosen = Chosen;
 
-        this.FindControl<TextBlock>("BackendWorth")!.Text = chosen is null
-            ? ""
-            : chosen.Available
-                ? $"What it is worth: {chosen.Backend.Worth}."
-                : "Not available on this machine. Its driver is not installed, or its service "
-                    + "is not running.";
+        // Said only when there is something wrong. What a backend is worth is on its own
+        // card in the list, and a paragraph repeating it under the picker was read once.
+        var worth = this.FindControl<TextBlock>("BackendWorth")!;
+
+        worth.IsVisible = chosen is { Available: false };
+        worth.Text = worth.IsVisible
+            ? "Not available on this machine. Its driver is not installed, or its service is "
+              + "not running."
+            : "";
 
         this.FindControl<Button>("Start")!.IsEnabled = chosen is { Available: true };
 
@@ -955,7 +1315,15 @@ public partial class MainWindow : Window
         // Shown from the last point of the batch, and shown whether or not the tip is down:
         // lean and twist are reported while hovering, so the pen can be turned and watched
         // without laying any ink.
-        _gauges.Show(Reported(last));
+        var shown = Reported(last);
+
+        _gauges.Show(shown);
+        _takeGauges.Show(shown);
+
+        _trace.Show(last.Pressure, session.MaxPressure);
+        _takeTrace.Show(last.Pressure, session.MaxPressure);
+
+        Aim(shown, session.MaxPressure);
 
         _pressure.Saw(last.Pressure);
         _tiltX.Saw(last.TiltX);
@@ -993,9 +1361,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var brush = new Nib(
-            26, SKColors.Black.WithAlpha(0xD0), 0.25, Buildup.PerStamp,
-            new Width(0.5, 26, (uint)Math.Max(1, range)), SpacedBy.Diameters);
+        var brush = Brush(range);
 
         var from = _haveLast ? _last : point;
 
@@ -1006,6 +1372,46 @@ public partial class MainWindow : Window
         _haveLast = true;
 
         pad.Redraw();
+    }
+
+    /// <summary>
+    /// Puts the nib outline where the pen is, on whichever pad is on screen.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Whether or not the tip is down, because that is what a cursor is for: a reader lines
+    /// the nib up before pressing, and a cursor that only appears once the ink does has
+    /// missed the moment it was wanted.
+    /// </para>
+    /// <para>
+    /// <b>At the brush's full size, not the size this pressure would make.</b> The first
+    /// version followed pressure, which sounds right and is not: hovering is zero pressure,
+    /// so the outline was half a pixel across and invisible at exactly the moment it was
+    /// being used. A cursor is for aiming, and what a reader aims with is the footprint the
+    /// nib can cover; how much of it this press fills is what the ink is for.
+    /// </para>
+    /// <para>
+    /// The shape and the angle do come from the brush, at this reading. Restating those here
+    /// would be a second opinion about the one thing the reader is checking.
+    /// </para>
+    /// </remarks>
+    private void Aim(Reading reading, int fullScale)
+    {
+        var pad = _step == 3 ? _pad : _strip;
+
+        if (!pad.Covers(reading.X, reading.Y))
+        {
+            pad.HideNib();
+
+            return;
+        }
+
+        var brush = Brush(fullScale);
+        var one = new Stroke([reading]);
+
+        var stamp = brush.StampAt(one, brush.Placements(one).FirstOrDefault());
+
+        pad.ShowNib(reading.X, reading.Y, brush.Diameter, stamp.Ratio, stamp.Degrees);
     }
 
     /// <summary>

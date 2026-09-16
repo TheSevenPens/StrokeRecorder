@@ -249,12 +249,22 @@ public static class Findings
     /// The lean below which a direction is not worth having, in degrees.
     /// </summary>
     /// <remarks>
-    /// Not a taste. This tablet reports the lean as a whole number, so a lean of L is really
-    /// L give or take a half, and the direction it implies is uncertain by about
-    /// <c>atan(0.5 / L)</c> — 27 degrees at a lean of 1, 14 at 2, and under 6 by the time L
-    /// reaches 5. Five is where the uncertainty falls below what anyone would notice in a nib.
+    /// <para>
+    /// <b>Measured, after being derived wrongly.</b> This first stood at five, on the
+    /// reasoning that the azimuth is worked out from a lean reported in whole degrees and is
+    /// therefore uncertain by <c>atan(0.5 / L)</c>. Wintab reports the azimuth directly, so
+    /// that derivation does not apply, and seven takes said so: the azimuth's step between
+    /// consecutive readings has a median of <b>zero at every lean</b>, and its worst case only
+    /// grows past a few degrees below a lean of three — 11 degrees at a lean of 4, 18 at 3,
+    /// 27 at 2, 45 at 1.
+    /// </para>
+    /// <para>
+    /// So three, and the shape of the thing is not a band of uncertainty but rare large
+    /// jumps. The figure that matters is how much of a stroke is down there at all, which in
+    /// those seven takes was none of six and a tenth of the seventh.
+    /// </para>
     /// </remarks>
-    private const double TooUprightToAim = 5;
+    private const double TooUprightToAim = 3;
 
     /// <summary>
     /// How much of the stroke was drawn too upright for the lean to have a direction.
@@ -282,7 +292,8 @@ public static class Findings
         {
             found.Add(new(Tone.Good, $"Never within {TooUprightToAim:F0}° of upright",
                 "So a nib driven by the direction of lean had something to point at for the "
-                + "whole stroke, and the near-vertical case cost this recording nothing."));
+                + "whole stroke. Six of the first seven takes recorded here were the same, "
+                + "which is why this is a stated limit rather than a filter."));
 
             return;
         }
@@ -292,9 +303,9 @@ public static class Findings
 
         found.Add(new(share > 0.05 ? Tone.Warn : Tone.Plain,
             $"{share * 100:F0}% of the stroke within {TooUprightToAim:F0}° of upright",
-            $"About {milliseconds:F0} ms of it. The lean reports in whole degrees, so below "
-            + $"{TooUprightToAim:F0}° the direction it implies is uncertain by more than a few "
-            + "degrees and a nib driven from it has little to go on. Where in the stroke it "
+            $"About {milliseconds:F0} ms of it. Below {TooUprightToAim:F0}° the reported "
+            + "azimuth starts making occasional large jumps -- 45 degrees at a lean of one, "
+            + "measured -- and a nib driven from it jumps with them. Where in the stroke it "
             + "happened matters as much as how much: at the ends is where a taper is."));
     }
 
