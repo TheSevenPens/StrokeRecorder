@@ -45,6 +45,7 @@ public static class Findings
         Pressure(found, take);
         Cadence(found, take);
         Orientation(found, take);
+        NearVertical(found, take);
         Pace(found, take);
 
         Named(found, take);
@@ -242,6 +243,59 @@ public static class Findings
                   + "the pen was held."
                 : "Lean varies; barrel rotation does not. Either the pen was not rolled or "
                   + "this one does not report rotation."));
+    }
+
+    /// <summary>
+    /// The lean below which a direction is not worth having, in degrees.
+    /// </summary>
+    /// <remarks>
+    /// Not a taste. This tablet reports the lean as a whole number, so a lean of L is really
+    /// L give or take a half, and the direction it implies is uncertain by about
+    /// <c>atan(0.5 / L)</c> — 27 degrees at a lean of 1, 14 at 2, and under 6 by the time L
+    /// reaches 5. Five is where the uncertainty falls below what anyone would notice in a nib.
+    /// </remarks>
+    private const double TooUprightToAim = 5;
+
+    /// <summary>
+    /// How much of the stroke was drawn too upright for the lean to have a direction.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Here to answer a question rather than to report a number. A nib driven by the azimuth
+    /// has nothing to point at while the pen is upright, and there are several ways to handle
+    /// that — hold the last direction, freeze below a threshold, let the nib go round as it
+    /// straightens, smooth the lean as a vector — all of which are work.
+    /// </para>
+    /// <para>
+    /// None of it is worth doing if a drawing hand never goes near vertical while in contact.
+    /// The first real stroke recorded here ran from 15 to 26 degrees end to end and never came
+    /// close. One stroke is not an answer; this is how the next twenty give one.
+    /// </para>
+    /// </remarks>
+    private static void NearVertical(List<Finding> found, Take take)
+    {
+        if (!take.Readings.Any(reading => reading.Tilted)) return;
+
+        var upright = take.Readings.Count(reading => reading.Lean < TooUprightToAim);
+
+        if (upright == 0)
+        {
+            found.Add(new(Tone.Good, $"Never within {TooUprightToAim:F0}° of upright",
+                "So a nib driven by the direction of lean had something to point at for the "
+                + "whole stroke, and the near-vertical case cost this recording nothing."));
+
+            return;
+        }
+
+        var share = upright / (double)take.Readings.Count;
+        var milliseconds = take.Milliseconds * share;
+
+        found.Add(new(share > 0.05 ? Tone.Warn : Tone.Plain,
+            $"{share * 100:F0}% of the stroke within {TooUprightToAim:F0}° of upright",
+            $"About {milliseconds:F0} ms of it. The lean reports in whole degrees, so below "
+            + $"{TooUprightToAim:F0}° the direction it implies is uncertain by more than a few "
+            + "degrees and a nib driven from it has little to go on. Where in the stroke it "
+            + "happened matters as much as how much: at the ends is where a taper is."));
     }
 
     /// <summary>The take against the brief it was drawn to, rather than against nothing.</summary>

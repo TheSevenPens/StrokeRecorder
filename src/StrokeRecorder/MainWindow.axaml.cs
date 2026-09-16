@@ -43,6 +43,7 @@ public partial class MainWindow : Window
     /// </remarks>
     private const int PollMilliseconds = 16;
 
+    private readonly Gauges _gauges = new();
     private readonly PenPad _strip;
     private readonly PenPad _pad;
     private readonly PenPad _replay;
@@ -104,6 +105,8 @@ public partial class MainWindow : Window
 
         _strip = new PenPad(1200, 420);
         this.FindControl<Panel>("StripHost")!.Children.Insert(0, _strip);
+
+        this.FindControl<Panel>("GaugeHost")!.Children.Add(_gauges);
 
         // Step three's own pad. Two of them rather than one moved between panels, because
         // they hold different things for different lengths of time: the strip is scribbled
@@ -949,6 +952,11 @@ public partial class MainWindow : Window
 
         var last = points[^1];
 
+        // Shown from the last point of the batch, and shown whether or not the tip is down:
+        // lean and twist are reported while hovering, so the pen can be turned and watched
+        // without laying any ink.
+        _gauges.Show(Reported(last));
+
         _pressure.Saw(last.Pressure);
         _tiltX.Saw(last.TiltX);
         _tiltY.Saw(last.TiltY);
@@ -1025,6 +1033,8 @@ public partial class MainWindow : Window
         // The extremes belong to the marks on the strip. Wiping one and keeping the other
         // leaves a range on screen that nothing visible accounts for.
         foreach (var readout in All) readout.Forget();
+
+        _gauges.Forget();
     }
 
     private void Say(string verdict, string conventions)

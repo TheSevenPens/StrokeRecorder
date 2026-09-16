@@ -154,18 +154,25 @@
             <TextBlock Name="Conventions" Classes="lede" FontSize="12" />
           </StackPanel>
         </Border>
+
+        <!-- The figures live with the words; the pictures live with the strip. Nine readouts
+             in the instrument column left the strip nothing to be. -->
+        <WrapPanel Name="Readouts" Orientation="Horizontal" />
       </StackPanel>
       </ScrollViewer>
 
       <!-- ────────────────────────────────────────────────────── the instrument ── -->
       <DockPanel Grid.Column="1">
 
-        <Border DockPanel.Dock="Bottom" Margin="0,14,0,0">
-          <WrapPanel Name="Readouts" Orientation="Horizontal" />
+        <!-- The dials. A reader asked to roll the barrel thirty degrees cannot do it from a
+             number, and can do it from a notch that moves. -->
+        <Border DockPanel.Dock="Bottom" Background="#FFFFFF" BorderBrush="#E2E2DC"
+                BorderThickness="1" CornerRadius="4" Padding="14,10" Margin="0,14,0,0">
+          <Panel Name="GaugeHost" />
         </Border>
 
         <Border Background="#FFFFFF" BorderBrush="#D8D8D2" BorderThickness="1"
-                CornerRadius="4" ClipToBounds="True">
+                CornerRadius="4" ClipToBounds="True" MinHeight="170">
           <Panel Name="StripHost">
             <TextBlock Name="StripHint" Text="Hover and press here"
                        HorizontalAlignment="Center" VerticalAlignment="Center"
