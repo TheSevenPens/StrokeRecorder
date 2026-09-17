@@ -29,7 +29,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\StrokeFieldGuide\StrokeFieldGuide.csproj" />
+    <ProjectReference Include="..\..\src\StrokeFieldGuide.Drawing\StrokeFieldGuide.Drawing.csproj" />
     <ProjectReference Include="..\StrokeFieldGuide.Canvas\StrokeFieldGuide.Canvas.csproj" />
     <ProjectReference Include="..\..\..\WinPenKit\WinPenKit.Avalonia\WinPenKit.Avalonia.csproj" />
   </ItemGroup>

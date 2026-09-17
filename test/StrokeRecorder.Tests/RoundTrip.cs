@@ -1,3 +1,4 @@
+using StrokeFieldGuide.Fixtures;
 using StrokeFieldGuide.Recorder;
 using StrokeFieldGuide.Strokes;
 using StrokeFieldGuide.Surfaces;
