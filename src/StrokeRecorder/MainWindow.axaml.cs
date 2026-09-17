@@ -534,7 +534,7 @@ public partial class MainWindow : Window
         // -- TryGetPlatformHandle answers null and the session starts against nothing.
         Opened += (_, _) => { _shown = true; Open(); };
 
-        Closed += (_, _) => Close(_session);
+        Closed += (_, _) => Shutdown();
     }
 
     /// <summary>
@@ -2687,6 +2687,34 @@ public partial class MainWindow : Window
         // While nothing has arrived, not while nothing is open. The session now opens by
         // itself, so tying the hint to that would take it away before it had been read.
         this.FindControl<TextBlock>("StripHint")!.IsVisible = _seen == 0;
+    }
+
+    /// <summary>
+    /// Everything this window owns, let go of in one place and in the right order.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The close handler used to close the pen session and nothing else. It left the poll
+    /// running, so a timer went on asking a disposed session for points while other windows
+    /// kept the dispatcher alive; and it left three <see cref="PenPad"/> surfaces, each
+    /// holding pixels the garbage collector is in no hurry over.
+    /// </para>
+    /// <para>
+    /// <b>The timer first.</b> Stopping the session while a drain is in flight is the one
+    /// ordering that can fault, and it is the ordering that a handler written a piece at a
+    /// time drifts into.
+    /// </para>
+    /// </remarks>
+    private void Shutdown()
+    {
+        _poll.Stop();
+
+        Close(_session);
+        _session = null;
+
+        _strip.Dispose();
+        _pad.Dispose();
+        _replay.Dispose();
     }
 
     private static void Close(IPenSession? session)
