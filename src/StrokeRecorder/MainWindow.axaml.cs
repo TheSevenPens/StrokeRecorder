@@ -367,6 +367,16 @@ public partial class MainWindow : Window
         // have worked, because the restart was never coming from the key-down path.
         AddHandler(KeyUpEvent, Released, RoutingStrategies.Tunnel);
 
+        // Wintab needs the window that owns the context to be the active one, and says so by
+        // going silent rather than by failing: WTEnable and WTOverlap put the context back on
+        // top of the overlap order when focus returns. Without this the recorder can come back
+        // from an alt-tab looking exactly like a pen that has stopped reporting.
+        //
+        // Every sample in WinPenKit does this in one line and this window never did. It has not
+        // cost a take yet only because nobody has left the window mid-recording -- which is a
+        // thing a person doing a long series of strokes will eventually do.
+        Activated += (_, _) => _session?.OnActivated();
+
         _poll = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(PollMilliseconds) };
         _poll.Tick += (_, _) =>
         {
@@ -2120,18 +2130,23 @@ public partial class MainWindow : Window
             // Altitude counts up from the tablet and a lean counts away from vertical, so
             // one is the other subtracted from a right angle. Azimuth and twist come across
             // untouched: both are already the angle the guide wants.
-            // Wintab's pkZ. Kept because of what it explains rather than what it draws: the
-            // airborne record stops for seconds at a time while the pen sits perfectly still
-            // in every column recorded here, and resumes 4 ms after it moves. The driver is
-            // asked for a packet on any change (lcMoveMask is PK.ALL), so something it can
-            // see must be changing during the hover that is invisible in x, y, lean, azimuth
-            // and twist. Height is the obvious candidate and was not being kept.
+            // Wintab's pkZ. Added to chase the airborne record's apparent silence before a
+            // landing, which turned out to be the pen's timestamp resynchronising rather than
+            // any silence -- so it explains nothing, and is kept because it is a real channel
+            // nothing else here measures: 0 to 401, falling steadily as the pen comes down.
+            //
+            // The reasoning it was added under was also wrong twice over. Wintab ignores the
+            // time, serial-number and button bits of lcMoveMask, so PK.ALL never did ask for
+            // a packet on "any change"; and the device sends byte-identical packets at full
+            // rate regardless, so there was no change to go looking for.
             Height: point.Z,
 
-            // Raw. Two open questions live in these bits: whether a Wintab queue overflow is
-            // what makes the airborne record stop before a stroke, which bit 1 would say and
-            // which nothing has ever read; and what bit 0 actually means, since asking
-            // IsInProximity for it rejected every hovering reading on this driver.
+            // Raw. Bit 1 is a queue overflow and has been clear on every reading of every take
+            // since this column existed, which is one of the several ways the silence it was
+            // added to explain turned out not to be one. Bit 0 is documented as "the cursor is
+            // out of the context", so zero while hovering and in contact is the spec's own
+            // polarity -- and asking IsInProximity for it rejected every hovering reading,
+            // which is WinPenKit#125.
             Status: point.Status,
             Lean: 90 - point.Altitude, Azimuth: point.Azimuth, Twist: point.Twist,
 
