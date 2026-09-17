@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics;
 using System.Reflection;
 using System.IO;
@@ -39,6 +40,11 @@ namespace StrokeFieldGuide.Recorder;
 /// presents one -- which is the other reason to build it first.
 /// </para>
 /// </remarks>
+[SuppressMessage("Usage", "CA1001:Types that own disposable fields should be disposable",
+    Justification =
+        "A window releases what it owns when it closes, which is what the Closed handler " +
+        "does. IDisposable would say a caller should dispose the window; nothing does that, " +
+        "so it would be a second release path nobody calls.")]
 public partial class MainWindow : Window
 {
     /// <summary>How often the session is drained, in milliseconds.</summary>
