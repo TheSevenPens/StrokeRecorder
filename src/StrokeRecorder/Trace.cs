@@ -24,75 +24,19 @@ namespace StrokeFieldGuide.Recorder;
 /// </remarks>
 public static class Trace
 {
-    public const string Format = "stroke-field-guide/take";
-
-    /// <summary>
-    /// Four, since readings gained the device's own status word.
-    /// </summary>
+    /// <summary>The format this writes, which <see cref="TraceFormat"/> defines.</summary>
     /// <remarks>
-    /// <para>
-    /// Version four adds a <c>status</c> column, raw and undecoded. On Wintab it is
-    /// <c>pkStatus</c>, and it is kept because two open questions are questions about what
-    /// its bits mean -- a queue overflow nothing has ever checked, and a proximity bit that
-    /// does not behave as its name suggests.
-    /// </para>
-    /// <remarks>
-    /// <para>
-    /// Version three adds a <c>height</c> column, from Wintab's <c>pkZ</c>. The columns are
-    /// declared in the file, so a reader that takes them from there rather than counting
-    /// positions needs no change; one that assumed seven does.
-    /// </para>
-    /// <remarks>
-    /// <para>
-    /// Version one put a single <c>readings</c> array at the top level, because a take was a
-    /// single stroke and nothing else was imaginable. Version two replaces it with
-    /// <c>strokes</c>, an array of objects each holding their own <c>readings</c> -- so a
-    /// one-stroke take is an array of one rather than a special case, and there is one shape
-    /// to read instead of two.
-    /// </para>
-    /// <para>
-    /// Each stroke may also carry <c>approach</c> and <c>departure</c> -- the pen in the air
-    /// for up to a quarter of a second either side of it, in the same columns and on the same
-    /// clock. Both are absent where there is nothing to report, which is an ordinary answer
-    /// rather than a fault: a pen already resting on the tablet has no approach.
-    /// </para>
-    /// <para>
-    /// The twelve version-one traces already recorded are <b>left as they are</b>. They are
-    /// evidence, they are cited by number in the notes, and rewriting them to tidy the format
-    /// would churn the corpus without adding a reading. Anything reading these files takes
-    /// both shapes: a top-level <c>readings</c> is a take of one stroke.
-    /// </para>
+    /// Named here as well so the recorder's own screens can say what they wrote without
+    /// reaching past the writer, but the definition is not here: writing a column the readers
+    /// do not know about is the whole class of fault the owner exists to make impossible.
     /// </remarks>
-    /// <remarks>
-    /// Version five adds <c>arrived</c>: the host clock, beside the pen's own. Four columns of
-    /// version four are unchanged and a reader of either can take both.
-    /// <para>
-    /// Version six changes no columns. It marks the take where <c>approach</c>,
-    /// <c>departure</c> and <c>lastSeenInTheAirMs</c> started being decided on that host clock
-    /// rather than the pen's -- so an approach present in a version-six file was within a
-    /// quarter second of the landing in real time, and one in an earlier file was within a
-    /// quarter second of a counter. Every empty approach in the corpus before this is a
-    /// reading the recorder was given and discarded.
-    /// </para>
-    /// </remarks>
-    public const int Version = 6;
+    public const string Format = TraceFormat.Format;
 
-    /// <summary>What goes in, in order, so a reader does not have to guess at the tuples.</summary>
-    /// <remarks>
-    /// Arrays rather than objects per reading. A stroke is thousands of them and the key names
-    /// repeated that many times are most of the file; the column list says what each slot is
-    /// once.
-    /// </remarks>
-    public static readonly string[] Columns =
-        ["at", "arrived", "x", "y", "pressure", "height", "status", "lean", "azimuth", "twist"];
+    /// <inheritdoc cref="TraceFormat.Version"/>
+    public const int Version = TraceFormat.Version;
 
-    /// <summary>What the two clocks are, said in the file so a reader need not be told.</summary>
-    public const string Clocks =
-        "'at' is the pen's own timestamp and 'arrived' is this application's clock, both in "
-        + "microseconds from the take's first reading. They are independent: a difference in "
-        + "'at' with no matching difference in 'arrived' is the device stamping a packet late, "
-        + "not the pen falling silent. Readings that reached the application in the same poll "
-        + "share an 'arrived' exactly.";
+    /// <inheritdoc cref="TraceFormat.Names"/>
+    public static IReadOnlyList<string> Columns => TraceFormat.Names;
 
     /// <summary>
     /// Writes a take, and answers where it went.
@@ -148,19 +92,19 @@ public static class Trace
 
         json.WriteStartObject();
 
-        json.WriteString("format", Format);
-        json.WriteNumber("formatVersion", Version);
-        json.WriteString("id", Path.GetFileNameWithoutExtension(path));
-        json.WriteString("gesture", take.Gesture.Id);
-        json.WriteString("intent", take.Intent);
-        json.WriteString("recordedAt", take.At.ToString("O"));
-        json.WriteString("endedBy", take.EndedBy);
-        json.WriteNumber("strokeCount", take.Strokes);
-        json.WriteBoolean("keptEveryAirborneReading", take.KeepingAloft);
-        json.WriteNumber("readingsHandedToTheRecorder", take.Routed);
-        json.WriteNumber("readingsDroppedForBeingOffThePad", take.DroppedOffPad);
-        json.WriteNumber("readingsAfterTheRecordingStopped", take.AfterTheStop);
-        json.WriteNumber("readingsAirborneAndNotKept", take.LeftOut);
+        json.WriteString(TraceFormat.Field.Format, Format);
+        json.WriteNumber(TraceFormat.Field.Version, Version);
+        json.WriteString(TraceFormat.Field.Id, Path.GetFileNameWithoutExtension(path));
+        json.WriteString(TraceFormat.Field.Gesture, take.Gesture.Id);
+        json.WriteString(TraceFormat.Field.Intent, take.Intent);
+        json.WriteString(TraceFormat.Field.RecordedAt, take.At.ToString("O"));
+        json.WriteString(TraceFormat.Field.EndedBy, take.EndedBy);
+        json.WriteNumber(TraceFormat.Field.StrokeCount, take.Strokes);
+        json.WriteBoolean(TraceFormat.Field.KeptEveryAirborneReading, take.KeepingAloft);
+        json.WriteNumber(TraceFormat.Field.HandedOver, take.Routed);
+        json.WriteNumber(TraceFormat.Field.OffThePad, take.DroppedOffPad);
+        json.WriteNumber(TraceFormat.Field.AfterTheStop, take.AfterTheStop);
+        json.WriteNumber(TraceFormat.Field.AirborneNotKept, take.LeftOut);
 
         // From beneath the session's own filtering, where the backend can say. The difference
         // between what the driver delivered and what the session passed on is the one number
@@ -168,40 +112,40 @@ public static class Trace
         // stopped reporting" and "the library discarded it".
         if (take.Counted is { } counted)
         {
-            json.WriteStartObject("whatTheSessionCounted");
-            json.WriteNumber("packetsFromTheDriver", counted.FromDriver);
-            json.WriteNumber("packetsOutsideTheCaptureRegion", counted.OutsideRegion);
-            json.WriteNumber("pointsDelivered", counted.Delivered);
+            json.WriteStartObject(TraceFormat.Field.Counted);
+            json.WriteNumber(TraceFormat.Field.FromDriver, counted.FromDriver);
+            json.WriteNumber(TraceFormat.Field.OutsideRegion, counted.OutsideRegion);
+            json.WriteNumber(TraceFormat.Field.Delivered, counted.Delivered);
             json.WriteEndObject();
         }
 
-        json.WriteStartObject("device");
-        json.WriteString("tablet", take.Tablet);
-        json.WriteString("driver", take.Driver);
-        json.WriteString("api", take.Api.ToString());
+        json.WriteStartObject(TraceFormat.Field.Device);
+        json.WriteString(TraceFormat.Field.Tablet, take.Tablet);
+        json.WriteString(TraceFormat.Field.Driver, take.Driver);
+        json.WriteString(TraceFormat.Field.Api, take.Api.ToString());
 
         // The number the readings do not carry and cannot. Without it every pressure below
         // is an integer with no meaning.
-        json.WriteNumber("fullScalePressure", take.FullScalePressure);
-        json.WriteString("conventions", take.Conventions);
+        json.WriteNumber(TraceFormat.Field.FullScalePressure, take.FullScalePressure);
+        json.WriteString(TraceFormat.Field.Conventions, take.Conventions);
         json.WriteEndObject();
 
         // What x and y are, which is not a surface pixel. They are desktop pixels as
         // reported, and this is the transform that was frozen when the tip went down.
-        json.WriteStartObject("placement");
-        json.WriteString("units", "desktop physical pixels, as reported by the session");
-        json.WriteString("note",
+        json.WriteStartObject(TraceFormat.Field.Placement);
+        json.WriteString(TraceFormat.Field.Units, "desktop physical pixels, as reported by the session");
+        json.WriteString(TraceFormat.Field.Note,
             "multiply by scale and add origin, per axis, for the surface pixel this was drawn at");
-        json.WriteNumber("scaleX", take.Placed.ScaleX);
-        json.WriteNumber("scaleY", take.Placed.ScaleY);
-        json.WriteNumber("originX", take.Placed.OriginX);
-        json.WriteNumber("originY", take.Placed.OriginY);
+        json.WriteNumber(TraceFormat.Field.ScaleX, take.Placed.ScaleX);
+        json.WriteNumber(TraceFormat.Field.ScaleY, take.Placed.ScaleY);
+        json.WriteNumber(TraceFormat.Field.OriginX, take.Placed.OriginX);
+        json.WriteNumber(TraceFormat.Field.OriginY, take.Placed.OriginY);
         json.WriteEndObject();
 
-        json.WriteString("clocks", Clocks);
+        json.WriteString(TraceFormat.Field.Clocks, TraceFormat.Clocks);
 
-        json.WriteStartArray("columns");
-        foreach (var column in Columns) json.WriteStringValue(column);
+        json.WriteStartArray(TraceFormat.Field.Columns);
+        foreach (var column in TraceFormat.Names) json.WriteStringValue(column);
         json.WriteEndArray();
 
         // Every timestamp in the file is relative to this one, across all the strokes rather
@@ -237,13 +181,15 @@ public static class Trace
                                || contact.Departure.Any(reading => reading.Arrived != 0))
                            || take.Aloft.Any(reading => reading.Arrived != 0);
 
-        json.WriteStartArray("strokes");
+        var from = new TraceFormat.Origins(start, began, hasHostClock);
+
+        json.WriteStartArray(TraceFormat.Field.Strokes);
 
         foreach (var contact in take.Contacts)
         {
             json.WriteStartObject();
-            json.WriteString("endedBy", contact.EndedBy);
-            json.WriteNumber("readingCount", contact.Count);
+            json.WriteString(TraceFormat.Field.EndedBy, contact.EndedBy);
+            json.WriteNumber(TraceFormat.Field.ReadingCount, contact.Count);
 
             // Why an approach is empty, where it is. Written whether or not there is one,
             // because the number is the answer either way: a large gap means the pen had left
@@ -256,11 +202,11 @@ public static class Trace
             // before version 6 carry the pen's figure here and it is not a duration.
             if (contact.SinceLastSeen is { } since)
             {
-                json.WriteNumber("lastSeenInTheAirMs", Math.Round(since / 1000.0, 1));
+                json.WriteNumber(TraceFormat.Field.LastSeenInTheAirMs, Math.Round(since / 1000.0, 1));
             }
             else
             {
-                json.WriteString("lastSeenInTheAir", "the pen was not reported in the air at all");
+                json.WriteString(TraceFormat.Field.LastSeenInTheAir, "the pen was not reported in the air at all");
             }
 
             // The pen in the air either side of the stroke, in the same columns and on the
@@ -269,23 +215,18 @@ public static class Trace
             // arrived and how it left.
             if (contact.Approach.Count > 0)
             {
-                json.WritePropertyName("approach");
-                json.WriteRawValue(Rows(contact.Approach, start, began, hasHostClock), skipInputValidation: true);
+                json.WritePropertyName(TraceFormat.Field.Approach);
+                json.WriteRawValue(Rows(contact.Approach, from), skipInputValidation: true);
             }
 
             if (contact.Departure.Count > 0)
             {
-                json.WritePropertyName("departure");
-                json.WriteRawValue(Rows(contact.Departure, start, began, hasHostClock), skipInputValidation: true);
+                json.WritePropertyName(TraceFormat.Field.Departure);
+                json.WriteRawValue(Rows(contact.Departure, from), skipInputValidation: true);
             }
 
-            // Written as raw text, one reading to a line. An indenting writer puts every
-            // number on its own line, which for a four-second stroke at two hundred readings
-            // a second is some seven thousand lines of one integer each -- a file nobody
-            // scrolls through and a diff nobody reads. The header stays indented, because
-            // that part is read.
-            json.WritePropertyName("readings");
-            json.WriteRawValue(Rows(contact.Readings, start, began, hasHostClock), skipInputValidation: true);
+            json.WritePropertyName(TraceFormat.Field.Readings);
+            json.WriteRawValue(Rows(contact.Readings, from), skipInputValidation: true);
 
             json.WriteEndObject();
         }
@@ -297,37 +238,35 @@ public static class Trace
         // gaps between strokes and not to either side of them.
         if (take.KeepingAloft)
         {
-            json.WriteString("aloftNote",
+            json.WriteString(TraceFormat.Field.AloftNote,
                 "Every reading taken with the tip up, unfiltered, including the packets that "
                 + "mean the pen has left range. Recorded to see what the recorder is choosing "
                 + "to drop. Not evidence about a stroke.");
 
-            json.WritePropertyName("aloft");
-            json.WriteRawValue(Rows(take.Aloft, start, began, hasHostClock), skipInputValidation: true);
+            json.WritePropertyName(TraceFormat.Field.Aloft);
+            json.WriteRawValue(Rows(take.Aloft, from), skipInputValidation: true);
         }
 
         json.WriteEndObject();
         json.Flush();
     }
 
-    /// <param name="start">
-    /// The take's first reading, which every timestamp in the file is measured from. Passed in
-    /// rather than taken per stroke, because a pen's timestamp has no stated origin: a
-    /// difference between two of them is meaningful and one on its own is not, and the
-    /// differences worth keeping include the ones that span a pen lift.
+    /// <param name="from">
+    /// What the timestamps are measured from, and whether the take has a host clock at all.
     /// </param>
-    /// <param name="began">
-    /// The same reading's arrival, which the <c>arrived</c> column is measured from. A separate
-    /// origin from <paramref name="start"/> on purpose: the two clocks are unrelated and
-    /// rebasing both against one of them would destroy the comparison the column exists for.
-    /// </param>
-    /// <param name="hasHostClock">
-    /// Whether this take carries a host clock at all. A property of the take rather than of a
-    /// reading: rebasing makes the first arrival of every take zero, so a per-reading test for
-    /// zero calls that reading's real timestamp missing.
-    /// </param>
-    private static string Rows(
-        IReadOnlyList<Reading> readings, long start, long began, bool hasHostClock)
+    /// <remarks>
+    /// Written as raw text, one reading to a line. An indenting writer puts every number on its
+    /// own line, which for a four-second stroke at two hundred readings a second is some seven
+    /// thousand lines of one integer each — a file nobody scrolls through and a diff nobody
+    /// reads. The header stays indented, because that part is read.
+    /// <para>
+    /// <b>The cells themselves are not spelled out here.</b> They used to be, in the column
+    /// order, beside a separate list that stated that order — so the two could disagree and
+    /// nothing would say so. <see cref="TraceFormat.Row"/> now produces them from the same list
+    /// the file declares.
+    /// </para>
+    /// </remarks>
+    private static string Rows(IReadOnlyList<Reading> readings, TraceFormat.Origins from)
     {
         if (readings.Count == 0) return "[]";
 
@@ -336,28 +275,13 @@ public static class Trace
 
         for (var each = 0; each < readings.Count; each++)
         {
-            var reading = readings[each];
-
             rows.Append("        [")
-                .Append(reading.At - start).Append(", ")
-                .Append(hasHostClock ? (reading.Arrived - began).ToString() : "null").Append(", ")
-                .Append(Round(reading.X, 3)).Append(", ")
-                .Append(Round(reading.Y, 3)).Append(", ")
-                .Append(reading.Pressure).Append(", ")
-                .Append(Round(reading.Height, 2)).Append(", ")
-                .Append(reading.Status).Append(", ")
-                .Append(Round(reading.Lean, 2)).Append(", ")
-                .Append(Round(reading.Azimuth, 2)).Append(", ")
-                .Append(Round(reading.Twist, 2))
+                .Append(TraceFormat.Row(readings[each], from))
                 .AppendLine(each == readings.Count - 1 ? "]" : "],");
         }
 
         return rows.Append("      ]").ToString();
     }
-
-    /// <summary>Invariant, because a file read on a machine with another decimal point is not a file.</summary>
-    private static string Round(double value, int places) =>
-        Math.Round(value, places).ToString(System.Globalization.CultureInfo.InvariantCulture);
 
     /// <summary>
     /// A file name nobody has to think about: what it is, what made it, and when.

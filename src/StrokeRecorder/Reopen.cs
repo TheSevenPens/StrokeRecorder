@@ -41,122 +41,104 @@ public static class Reopen
 
             var root = json.RootElement;
 
-            if (!root.TryGetProperty("columns", out var columns))
+            if (!root.TryGetProperty(TraceFormat.Field.Columns, out var columns))
             {
                 return new(null, "No columns: this is not a trace this recorder wrote.");
             }
 
-            var at = Column(columns, "at");
-            var arrived = Column(columns, "arrived");
-            var x = Column(columns, "x");
-            var y = Column(columns, "y");
-            var pressure = Column(columns, "pressure");
-            var height = Column(columns, "height");
-            var status = Column(columns, "status");
-            var lean = Column(columns, "lean");
-            var azimuth = Column(columns, "azimuth");
-            var twist = Column(columns, "twist");
+            var layout = new TraceFormat.Layout(columns);
 
-            if (x < 0 || y < 0 || pressure < 0)
+            if (!layout.Positioned)
             {
                 return new(null, "The columns do not carry a position and a pressure.");
             }
 
-            var gestureId = Text(root, "gesture");
+            var gestureId = Text(root, TraceFormat.Field.Gesture);
             var gesture = Gestures.All.FirstOrDefault(each => each.Id == gestureId)
                           ?? Gestures.All[0];
 
-            var api = Enum.TryParse<InputApi>(Text(root, "device", "api"), out var parsed)
+            var api = Enum.TryParse<InputApi>(Text(root, TraceFormat.Field.Device, TraceFormat.Field.Api), out var parsed)
                 ? parsed
                 : InputApi.WintabDigitizer;
 
-            var full = Number(root, "device", "fullScalePressure");
+            var full = Number(root, TraceFormat.Field.Device, TraceFormat.Field.FullScalePressure);
 
             var take = new Take(gesture, api, full > 0 ? (int)full : 32767, Placement(root))
             {
                 // The day it was recorded, not the day it was reopened. Without this a
                 // recording from last September came back stamped today, and saving it
                 // again wrote that over the only record of when it happened.
-                At = DateTimeOffset.TryParse(Text(root, "recordedAt"), out var when)
+                At = DateTimeOffset.TryParse(Text(root, TraceFormat.Field.RecordedAt), out var when)
                     ? when
                     : DateTimeOffset.Now,
-                Tablet = Text(root, "device", "tablet"),
-                Driver = Text(root, "device", "driver"),
-                Conventions = Text(root, "device", "conventions"),
-                Intent = Text(root, "intent"),
-                EndedBy = Text(root, "endedBy"),
+                Tablet = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Tablet),
+                Driver = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Driver),
+                Conventions = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Conventions),
+                Intent = Text(root, TraceFormat.Field.Intent),
+                EndedBy = Text(root, TraceFormat.Field.EndedBy),
             };
 
-            Strokes.Reading Read(JsonElement row) => new(
-                X: Cell(row, x), Y: Cell(row, y),
-                Pressure: (uint)Math.Max(0, Cell(row, pressure)),
-                At: (long)Cell(row, at),
-                Height: Cell(row, height),
-                Status: (uint)Math.Max(0, Cell(row, status)),
-                Lean: Cell(row, lean), Azimuth: Cell(row, azimuth), Twist: Cell(row, twist),
-                Arrived: (long)Cell(row, arrived));
-
             // Version one: no strokes array, every reading at the top level, one stroke.
-            if (root.TryGetProperty("readings", out var flat) && flat.ValueKind == JsonValueKind.Array)
+            if (root.TryGetProperty(TraceFormat.Field.Readings, out var flat) && flat.ValueKind == JsonValueKind.Array)
             {
                 var only = take.Begin();
 
-                foreach (var row in flat.EnumerateArray()) only.Add(Read(row));
+                foreach (var row in flat.EnumerateArray()) only.Add(layout.Of(row));
             }
 
-            if (root.TryGetProperty("strokes", out var strokes) && strokes.ValueKind == JsonValueKind.Array)
+            if (root.TryGetProperty(TraceFormat.Field.Strokes, out var strokes) && strokes.ValueKind == JsonValueKind.Array)
             {
                 foreach (var stroke in strokes.EnumerateArray())
                 {
                     var contact = take.Begin();
 
-                    if (stroke.TryGetProperty("readings", out var rows))
+                    if (stroke.TryGetProperty(TraceFormat.Field.Readings, out var rows))
                     {
-                        foreach (var row in rows.EnumerateArray()) contact.Add(Read(row));
+                        foreach (var row in rows.EnumerateArray()) contact.Add(layout.Of(row));
                     }
 
-                    if (stroke.TryGetProperty("approach", out var approach))
+                    if (stroke.TryGetProperty(TraceFormat.Field.Approach, out var approach))
                     {
                         contact.Approaching(
-                            approach.EnumerateArray().Select(Read).ToList(),
-                            stroke.TryGetProperty("lastSeenInTheAirMs", out var since)
+                            approach.EnumerateArray().Select(layout.Of).ToList(),
+                            stroke.TryGetProperty(TraceFormat.Field.LastSeenInTheAirMs, out var since)
                                 ? (long)(since.GetDouble() * 1000)
                                 : null,
                             null);
                     }
 
-                    if (stroke.TryGetProperty("departure", out var departure))
+                    if (stroke.TryGetProperty(TraceFormat.Field.Departure, out var departure))
                     {
-                        foreach (var row in departure.EnumerateArray()) contact.Departing(Read(row));
+                        foreach (var row in departure.EnumerateArray()) contact.Departing(layout.Of(row));
                     }
 
-                    contact.EndedBy = stroke.TryGetProperty("endedBy", out var why)
+                    contact.EndedBy = stroke.TryGetProperty(TraceFormat.Field.EndedBy, out var why)
                         ? why.GetString() ?? ""
                         : "";
                 }
             }
 
-            if (root.TryGetProperty("aloft", out var aloft) && aloft.ValueKind == JsonValueKind.Array)
+            if (root.TryGetProperty(TraceFormat.Field.Aloft, out var aloft) && aloft.ValueKind == JsonValueKind.Array)
             {
-                take.KeepAll(aloft.EnumerateArray().Select(Read).ToList());
+                take.KeepAll(aloft.EnumerateArray().Select(layout.Of).ToList());
             }
 
             // The counts the session reported, where the file carries them. Restored so the
             // ledger says the same thing it said on the day, rather than reporting the
             // absence of a session that has long since closed.
-            if (root.TryGetProperty("whatTheSessionCounted", out var counted))
+            if (root.TryGetProperty(TraceFormat.Field.Counted, out var counted))
             {
                 take.Counted = (
-                    (long)Number(counted, "packetsFromTheDriver"),
-                    (long)Number(counted, "packetsOutsideTheCaptureRegion"),
-                    (long)Number(counted, "pointsDelivered"));
+                    (long)Number(counted, TraceFormat.Field.FromDriver),
+                    (long)Number(counted, TraceFormat.Field.OutsideRegion),
+                    (long)Number(counted, TraceFormat.Field.Delivered));
             }
 
             take.Reopened(
-                (int)Number(root, "readingsHandedToTheRecorder"),
-                (int)Number(root, "readingsDroppedForBeingOffThePad"),
-                (int)Number(root, "readingsAfterTheRecordingStopped"),
-                (int)Number(root, "readingsAirborneAndNotKept"));
+                (int)Number(root, TraceFormat.Field.HandedOver),
+                (int)Number(root, TraceFormat.Field.OffThePad),
+                (int)Number(root, TraceFormat.Field.AfterTheStop),
+                (int)Number(root, TraceFormat.Field.AirborneNotKept));
 
             return take.Holds
                 ? new(take, null)
@@ -170,41 +152,14 @@ public static class Reopen
 
     private static InkTransform Placement(JsonElement root)
     {
-        if (!root.TryGetProperty("placement", out var placed)) return new InkTransform(1, 1, 0, 0);
+        if (!root.TryGetProperty(TraceFormat.Field.Placement, out var placed)) return new InkTransform(1, 1, 0, 0);
 
         return new InkTransform(
-            Number(placed, "scaleX") is var sx and not 0 ? sx : 1,
-            Number(placed, "scaleY") is var sy and not 0 ? sy : 1,
-            Number(placed, "originX"),
-            Number(placed, "originY"));
+            Number(placed, TraceFormat.Field.ScaleX) is var sx and not 0 ? sx : 1,
+            Number(placed, TraceFormat.Field.ScaleY) is var sy and not 0 ? sy : 1,
+            Number(placed, TraceFormat.Field.OriginX),
+            Number(placed, TraceFormat.Field.OriginY));
     }
-
-    /// <summary>Which slot a column sits in, or -1 when the file does not carry it.</summary>
-    private static int Column(JsonElement columns, string name)
-    {
-        var slot = 0;
-
-        foreach (var column in columns.EnumerateArray())
-        {
-            if (column.GetString() == name) return slot;
-
-            slot++;
-        }
-
-        return -1;
-    }
-
-    /// <summary>A cell of a row, or zero where the column is absent or the row is short.</summary>
-    /// <remarks>
-    /// <b>A null is an absence, not an error.</b> The writer emits null for a column a take
-    /// does not carry -- the host clock on anything recorded before there was one -- and
-    /// calling <c>GetDouble</c> on it throws. Reading a file this tool had written was enough
-    /// to hit it, which is how 33 of 33 published recordings failed a second round trip.
-    /// </remarks>
-    private static double Cell(JsonElement row, int column) =>
-        column >= 0 && column < row.GetArrayLength() && row[column].ValueKind == JsonValueKind.Number
-            ? row[column].GetDouble()
-            : 0;
 
     private static string Text(JsonElement root, params string[] path)
     {
