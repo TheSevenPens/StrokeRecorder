@@ -1,4 +1,3 @@
-using StrokeFieldGuide.Fixtures;
 using StrokeFieldGuide.Recorder;
 using StrokeKit.Strokes;
 using StrokeKit.Surfaces;
@@ -158,7 +157,7 @@ public class RoundTrip
     [Fact]
     public void Every_published_recording_survives_a_round_trip()
     {
-        var corpus = Recorded.Root();
+        var corpus = Traces.Folder();
 
         Assert.True(corpus is not null,
             "no recordings found. corpus/ is a submodule: git submodule update --init");

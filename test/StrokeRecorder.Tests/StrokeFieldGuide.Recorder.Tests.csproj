@@ -28,13 +28,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\app\StrokeFieldGuide.Recorder\StrokeFieldGuide.Recorder.csproj" />
-
-    <!--
-      The guide, for the corpus alone. RoundTrip reads every published recording through
-      Recorded, so this test project is genuinely about the corpus and not only about the
-      recorder. The recorder itself reaches none of this: it stands on the drawing core.
-    -->
-    <ProjectReference Include="..\..\src\StrokeFieldGuide\StrokeFieldGuide.csproj" />
   </ItemGroup>
 
 </Project>
