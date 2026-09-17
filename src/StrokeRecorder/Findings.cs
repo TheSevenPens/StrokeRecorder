@@ -732,7 +732,33 @@ public static class Findings
     /// <summary>The take against the brief it was drawn to, rather than against nothing.</summary>
     private static void Pace(List<Finding> found, Take take)
     {
-        var seconds = take.Milliseconds / 1000.0;
+        // On the host clock where there is one, and said to be otherwise where there is not.
+        //
+        // This used to read take.Milliseconds, which is the pen's own timestamp -- a packet
+        // counter running at 0.673 of real time on the hardware measured here. A take lasting
+        // three seconds reported two, and was then told it had missed a three-to-four second
+        // brief it had in fact met.
+        var (seconds, on) = Timing.Spanned(take.Readings);
+
+        if (on == Clock.Pen)
+        {
+            found.Add(new(Tone.Plain,
+                $"{seconds:F2} seconds on the pen's own clock, which is not a clock",
+                "This recording carries no host timestamp, so how long it took cannot be said "
+                + "in seconds. The pen's stamp advances once per packet delivered rather than "
+                + "with time, so the number above is in packets-worth rather than in seconds "
+                + "and is not comparable with a brief or with another take."));
+
+            return;
+        }
+
+        if (on == Clock.None)
+        {
+            found.Add(new(Tone.Plain, "How long this took cannot be said",
+                "Neither clock moved across this recording."));
+
+            return;
+        }
 
         var (wanted, low, high) = take.Gesture.Id switch
         {

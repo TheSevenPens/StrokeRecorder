@@ -148,7 +148,20 @@ public sealed class Contact
     /// <summary>The readings as a stroke, for anything that draws one.</summary>
     public Stroke? Stroke => _readings.Count == 0 ? null : new Stroke(_readings);
 
-    /// <summary>How long the tip was down, in milliseconds, from the pen's own clock.</summary>
+    /// <summary>
+    /// How long the tip was down, in milliseconds, <b>on the pen's own clock</b>.
+    /// </summary>
+    /// <remarks>
+    /// <b>Not elapsed time.</b> The pen's timestamp is a packet counter: it advances a flat
+    /// 4.166 ms per packet delivered whatever the elapsed time, and on the hardware measured
+    /// here it runs at 0.673 of real time. Anything wanting how long a recording actually
+    /// took should ask <see cref="Timing.Spanned"/>, which answers on the host clock where
+    /// there is one and says so where there is not.
+    /// <para>
+    /// Kept because the counter is real evidence about the device, and because the traces
+    /// carry it. It is the interpretation as seconds that was wrong.
+    /// </para>
+    /// </remarks>
     public double Milliseconds =>
         _readings.Count < 2 ? 0 : (_readings[^1].At - _readings[0].At) / 1000.0;
 }

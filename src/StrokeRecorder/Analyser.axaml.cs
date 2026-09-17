@@ -34,6 +34,13 @@ public partial class Analyser : Window
     private readonly List<Border> _rows = [];
 
     private DispatcherTimer? _playing;
+
+    /// <summary>How much slower than the hand a replay runs.</summary>
+    /// <remarks>
+    /// At the rate a pen reports, a flick is over in sixty milliseconds and a replay at that
+    /// speed shows what watching the hand showed, which is nothing.
+    /// </remarks>
+    private const double Slower = 20;
     private int _at;
 
     public Analyser() => InitializeComponent();
@@ -81,7 +88,7 @@ public partial class Analyser : Window
         this.FindControl<Panel>("StrokeHost")!.Children.Add(_closely);
 
         Channel("pressure", _readings.Select(reading => (double)reading.Pressure).ToList());
-        Channel("speed px/s", Speed());
+        if (Speed() is { } speed) Channel(speed.Label, speed.Values);
         Channel("lean", _readings.Select(reading => reading.Lean).ToList());
 
         Rows();
@@ -90,30 +97,29 @@ public partial class Analyser : Window
     }
 
     /// <summary>
-    /// How fast the pen was travelling at each reading, in pixels a second.
+    /// How fast the pen was travelling, in pixels a second, and what to call the channel.
     /// </summary>
     /// <remarks>
-    /// Over the step before each reading, on the host clock, and repeated for the first —
-    /// which has no step before it and would otherwise open every stroke with a zero that is
-    /// not a measurement.
+    /// <para>
+    /// <see cref="Timing.Speeds"/> answers one estimate per drained batch rather than one per
+    /// reading, because a batch shares its arrival stamp and time within it is unobserved.
+    /// The version this replaces divided one step by one arrival difference and carried the
+    /// previous answer forward where that difference was zero, which measures nothing and put
+    /// a drop at every batch boundary that the hand never made.
+    /// </para>
+    /// <para>
+    /// Where there is no host clock there is no speed, and the channel says so rather than
+    /// drawing a line in pixels per counter-second.
+    /// </para>
     /// </remarks>
-    private IReadOnlyList<double> Speed()
+    private (string Label, IReadOnlyList<double> Values)? Speed()
     {
-        var speeds = new double[_readings.Count];
+        var estimated = Timing.Speeds(_readings);
 
-        for (var each = 1; each < _readings.Count; each++)
-        {
-            var seconds = (_readings[each].Arrived - _readings[each - 1].Arrived) / 1e6;
+        if (estimated.All(one => one is null)) return null;
 
-            speeds[each] = seconds <= 0
-                ? speeds[each - 1]
-                : Math.Sqrt(Math.Pow(_readings[each].X - _readings[each - 1].X, 2)
-                          + Math.Pow(_readings[each].Y - _readings[each - 1].Y, 2)) / seconds;
-        }
-
-        if (speeds.Length > 1) speeds[0] = speeds[1];
-
-        return speeds;
+        return ("speed px/s, averaged over each batch",
+            [.. estimated.Select(one => one ?? 0)]);
     }
 
     /// <summary>
@@ -239,7 +245,16 @@ public partial class Analyser : Window
 
         if (_at >= _readings.Count - 1) Move(0);
 
-        _playing = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(120) };
+        // Against the recorded times where there are any, so a pause where the hand stopped
+        // plays as a pause. Stepping one reading every 120 ms is a fine way to look through a
+        // recording and is not a replay: it gives a flick and a four-second diagonal the same
+        // pace, which is the one thing a replay is for showing.
+        var schedule = Timing.Schedule(_readings, Slower);
+
+        var began = DateTime.UtcNow;
+        var from = _at;
+
+        _playing = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
 
         _playing.Tick += (_, _) =>
         {
@@ -250,7 +265,23 @@ public partial class Analyser : Window
                 return;
             }
 
-            Move(_at + 1);
+            if (schedule is null)
+            {
+                // No host clock: stepping, and the button says so.
+                Move(_at + 1);
+
+                return;
+            }
+
+            // Whichever readings are due by now, which takes readings sharing a stamp
+            // together -- they arrived together and there is nothing recorded to spread them
+            // over.
+            var elapsed = (DateTime.UtcNow - began).TotalMilliseconds + schedule[from];
+            var next = _at;
+
+            while (next < _readings.Count - 1 && schedule[next + 1] <= elapsed) next++;
+
+            if (next != _at) Move(next);
         };
 
         _playing.Start();
