@@ -2,7 +2,7 @@ using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 
-namespace StrokeFieldGuide.Recorder;
+namespace StrokeRecorder;
 
 public partial class App : Application
 {

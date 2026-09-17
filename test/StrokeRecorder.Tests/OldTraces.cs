@@ -1,6 +1,6 @@
 using StrokeKit.Strokes;
 
-namespace StrokeFieldGuide.Recorder.Tests;
+namespace StrokeRecorder.Tests;
 
 /// <summary>
 /// That both readers take a whole file whose layout is not this version's.

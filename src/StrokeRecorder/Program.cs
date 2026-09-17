@@ -1,6 +1,6 @@
 using Avalonia;
 
-namespace StrokeFieldGuide.Recorder;
+namespace StrokeRecorder;
 
 internal static class Program
 {

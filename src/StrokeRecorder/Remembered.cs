@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace StrokeFieldGuide.Recorder;
+namespace StrokeRecorder;
 
 /// <summary>
 /// The few answers that are the same every time this window opens.

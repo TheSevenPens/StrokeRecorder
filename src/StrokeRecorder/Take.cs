@@ -2,7 +2,7 @@ using StrokeKit.Strokes;
 using StrokeKit.Surfaces;
 using WinPenKit;
 
-namespace StrokeFieldGuide.Recorder;
+namespace StrokeRecorder;
 
 /// <summary>Where a take has got to.</summary>
 public enum Capture

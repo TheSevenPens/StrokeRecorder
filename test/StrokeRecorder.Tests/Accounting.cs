@@ -1,9 +1,9 @@
-using StrokeFieldGuide.Recorder;
+using StrokeRecorder;
 using StrokeKit.Strokes;
 using StrokeKit.Surfaces;
 using WinPenKit;
 
-namespace StrokeFieldGuide.Recorder.Tests;
+namespace StrokeRecorder.Tests;
 
 /// <summary>
 /// That the recorder does not claim a recording is whole when it has not looked.

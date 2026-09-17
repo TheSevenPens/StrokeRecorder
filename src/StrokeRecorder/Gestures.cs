@@ -1,4 +1,4 @@
-namespace StrokeFieldGuide.Recorder;
+namespace StrokeRecorder;
 
 /// <summary>
 /// The shape a guide is drawn as, in fractions of the box rather than pixels.

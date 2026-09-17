@@ -6,7 +6,7 @@ using StrokeKit.Strokes;
 // This project has a Pen of its own -- the backends -- and it is not this one.
 using Stroke = Avalonia.Media.Pen;
 
-namespace StrokeFieldGuide.Recorder;
+namespace StrokeRecorder;
 
 /// <summary>
 /// What the pen is doing, drawn rather than numbered.

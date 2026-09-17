@@ -1,7 +1,7 @@
-using StrokeFieldGuide.Recorder;
+using StrokeRecorder;
 using WinPenKit;
 
-namespace StrokeFieldGuide.Recorder.Tests;
+namespace StrokeRecorder.Tests;
 
 /// <summary>
 /// What the backend list should be showing after it asks again what can be opened.

@@ -1,6 +1,6 @@
 using WinPenKit;
 
-namespace StrokeFieldGuide.Recorder;
+namespace StrokeRecorder;
 
 /// <summary>
 /// Which backend the list should be showing, after asking what can be opened.

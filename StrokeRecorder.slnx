@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/StrokeRecorder/StrokeRecorder.csproj" />
+  </Folder>
+  <Folder Name="/test/">
+    <Project Path="test/StrokeRecorder.Tests/StrokeRecorder.Tests.csproj" />
+  </Folder>
+</Solution>

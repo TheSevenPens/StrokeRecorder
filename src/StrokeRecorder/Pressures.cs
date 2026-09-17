@@ -4,7 +4,7 @@ using Avalonia.Media;
 
 using Stroke = Avalonia.Media.Pen;
 
-namespace StrokeFieldGuide.Recorder;
+namespace StrokeRecorder;
 
 /// <summary>
 /// Pressure over the last second or two, as a line rather than a number.

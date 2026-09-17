@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    A tool, not part of the guide. It records strokes from a real tablet so that Parts IV
-    and V have something to be about, and it is the first thing here to put WinPenKit and
-    this guide's surfaces together in one window.
+    A tool for recording what a pen actually reports. It exists so that
+    StrokeFieldGuide's later parts have real strokes to be about, and it is where the
+    published corpus comes from.
 
     Modelled on the browser recorder in StrokeRenderingFieldGuide, whose five-step shape is
     the part worth keeping: check the pen first, choose a brief, record, review, then name
@@ -15,8 +15,8 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
-    <RootNamespace>StrokeFieldGuide.Recorder</RootNamespace>
-    <AssemblyName>StrokeFieldGuide.Recorder</AssemblyName>
+    <RootNamespace>StrokeRecorder</RootNamespace>
+    <AssemblyName>StrokeRecorder</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>

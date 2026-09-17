@@ -1,0 +1,7 @@
+bin/
+obj/
+.vs/
+*.user
+
+# Where a take lands when it is recorded, before it is contributed to the corpus.
+takes/

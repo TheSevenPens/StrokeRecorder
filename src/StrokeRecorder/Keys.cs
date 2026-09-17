@@ -1,4 +1,4 @@
-namespace StrokeFieldGuide.Recorder;
+namespace StrokeRecorder;
 
 /// <summary>What a key press asks the recorder to do.</summary>
 public enum Command

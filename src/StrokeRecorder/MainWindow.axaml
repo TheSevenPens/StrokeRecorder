@@ -6,7 +6,7 @@
      StrokeRows, OpenTake — and the question does not arise. -->
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        x:Class="StrokeFieldGuide.Recorder.MainWindow"
+        x:Class="StrokeRecorder.MainWindow"
         Title="Record a stroke — Stroke Field Guide"
         Width="1100" Height="740"
         Background="#F7F7F4">

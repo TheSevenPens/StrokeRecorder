@@ -1,6 +1,6 @@
 using StrokeKit.Strokes;
 
-namespace StrokeFieldGuide.Recorder;
+namespace StrokeRecorder;
 
 /// <summary>Which clock a set of readings can be measured on.</summary>
 public enum Clock

@@ -1,9 +1,9 @@
-using StrokeFieldGuide.Recorder;
+using StrokeRecorder;
 using StrokeKit.Strokes;
 using StrokeKit.Surfaces;
 using WinPenKit;
 
-namespace StrokeFieldGuide.Recorder.Tests;
+namespace StrokeRecorder.Tests;
 
 /// <summary>
 /// What the recorder does with readings it is given.

@@ -1,7 +1,7 @@
 using StrokeKit.Strokes;
 using WinPenKit;
 
-namespace StrokeFieldGuide.Recorder;
+namespace StrokeRecorder;
 
 /// <summary>How much a finding wants to be looked at.</summary>
 public enum Tone

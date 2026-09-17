@@ -1,0 +1,21 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <LangVersion>14</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!--
+    Both versions follow StrokeKit, which follows WinPenKit. A mismatch resolves quietly,
+    because nuspec constraints are minimums, so the versions are stated once here and have to
+    match the kit's.
+  -->
+  <PropertyGroup>
+    <SkiaSharpVersion>3.119.4</SkiaSharpVersion>
+    <AvaloniaVersion>12.1.2</AvaloniaVersion>
+  </PropertyGroup>
+
+</Project>

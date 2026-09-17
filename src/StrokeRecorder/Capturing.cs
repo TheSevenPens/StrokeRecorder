@@ -2,7 +2,7 @@ using StrokeKit.Strokes;
 using StrokeKit.Surfaces;
 using WinPenKit;
 
-namespace StrokeFieldGuide.Recorder;
+namespace StrokeRecorder;
 
 /// <summary>
 /// What became of one reading the recorder was handed.

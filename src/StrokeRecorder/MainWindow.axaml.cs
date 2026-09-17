@@ -21,7 +21,7 @@ using StrokeKit.Surfaces;
 using StrokeKit.Views;
 using WinPenKit;
 
-namespace StrokeFieldGuide.Recorder;
+namespace StrokeRecorder;
 
 /// <summary>
 /// Step one: prove the pen is reporting before anybody records anything with it.

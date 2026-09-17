@@ -2,7 +2,7 @@ using System.Text;
 using System.Text.Json;
 using StrokeKit.Strokes;
 
-namespace StrokeFieldGuide.Recorder;
+namespace StrokeRecorder;
 
 /// <summary>
 /// A take written down, in a form somebody who was not there can read.

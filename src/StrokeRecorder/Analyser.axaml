@@ -3,7 +3,7 @@
      here read as controls for that reason: ReadingRows, StrokeHost, ChannelHost. -->
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        x:Class="StrokeFieldGuide.Recorder.Analyser"
+        x:Class="StrokeRecorder.Analyser"
         Width="1280" Height="820" WindowStartupLocation="CenterOwner"
         Background="#F2F1EB" Title="Stroke">
 

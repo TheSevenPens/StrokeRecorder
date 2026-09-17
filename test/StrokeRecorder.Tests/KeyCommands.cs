@@ -1,6 +1,6 @@
-using StrokeFieldGuide.Recorder;
+using StrokeRecorder;
 
-namespace StrokeFieldGuide.Recorder.Tests;
+namespace StrokeRecorder.Tests;
 
 /// <summary>
 /// What the space bar and escape mean, over the key sequences a hand actually produces.

@@ -4,7 +4,7 @@ using Avalonia.Media;
 using Avalonia.Threading;
 using StrokeKit.Strokes;
 
-namespace StrokeFieldGuide.Recorder;
+namespace StrokeRecorder;
 
 /// <summary>
 /// One stroke, taken apart.

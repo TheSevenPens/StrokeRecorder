@@ -3,7 +3,7 @@ using StrokeKit.Strokes;
 using StrokeKit.Surfaces;
 using WinPenKit;
 
-namespace StrokeFieldGuide.Recorder;
+namespace StrokeRecorder;
 
 /// <summary>
 /// Reads a trace back into a <see cref="Take"/>.

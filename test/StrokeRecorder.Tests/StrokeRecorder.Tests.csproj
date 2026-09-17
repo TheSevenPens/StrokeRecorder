@@ -13,7 +13,7 @@
   -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
-    <RootNamespace>StrokeFieldGuide.Recorder.Tests</RootNamespace>
+    <RootNamespace>StrokeRecorder.Tests</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,7 +27,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\app\StrokeFieldGuide.Recorder\StrokeFieldGuide.Recorder.csproj" />
+    <ProjectReference Include="..\..\src\StrokeRecorder\StrokeRecorder.csproj" />
   </ItemGroup>
 
 </Project>

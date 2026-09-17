@@ -1,0 +1,48 @@
+name: checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    # Windows because this targets net10.0-windows, which follows from WinPenKit targeting it.
+    runs-on: windows-latest
+
+    steps:
+      # recursive, and for two reasons.
+      #
+      # vendor/StrokeKit is the drawing core, and WinPenKit is a submodule of that — one level
+      # would leave the kit unbuildable.
+      #
+      # corpus/ is StrokeCorpus. RoundTrip reads all 33 published recordings back through the
+      # same reader that writes them, which is how a fault that reached every published file
+      # was found. Without the submodule those cases have nothing to run against and pass
+      # while checking nothing, which is worse than failing.
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: 'preview'
+
+      - name: Build
+        run: dotnet build StrokeRecorder.slnx -c Release
+
+      # No tablet and no window. What the recorder does with readings it is given is the part
+      # that was never tested and where a round-trip fault sat long enough to reach every
+      # published recording.
+      - name: Test
+        run: dotnet test StrokeRecorder.slnx -c Release --no-build
+
+      # The corpus is pinned, so this says out loud how much of it the round trip actually saw.
+      # A suite that quietly ran against an empty folder would report the same green.
+      - name: Say what the corpus held
+        shell: pwsh
+        run: |
+          $traces = Get-ChildItem corpus/traces -Filter *.json -ErrorAction SilentlyContinue
+          Write-Output "corpus/traces: $($traces.Count) recordings"
+          if ($traces.Count -eq 0) { throw "the corpus submodule is empty; the round trip checked nothing" }
