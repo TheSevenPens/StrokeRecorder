@@ -66,8 +66,16 @@ public static class Trace
     /// <remarks>
     /// Version five adds <c>arrived</c>: the host clock, beside the pen's own. Four columns of
     /// version four are unchanged and a reader of either can take both.
+    /// <para>
+    /// Version six changes no columns. It marks the take where <c>approach</c>,
+    /// <c>departure</c> and <c>lastSeenInTheAirMs</c> started being decided on that host clock
+    /// rather than the pen's -- so an approach present in a version-six file was within a
+    /// quarter second of the landing in real time, and one in an earlier file was within a
+    /// quarter second of a counter. Every empty approach in the corpus before this is a
+    /// reading the recorder was given and discarded.
+    /// </para>
     /// </remarks>
-    public const int Version = 5;
+    public const int Version = 6;
 
     /// <summary>What goes in, in order, so a reader does not have to guess at the tuples.</summary>
     /// <remarks>
@@ -181,6 +189,12 @@ public static class Trace
             // Why an approach is empty, where it is. Written whether or not there is one,
             // because the number is the answer either way: a large gap means the pen had left
             // range and there was nothing to keep, a small one with no approach is a fault.
+            //
+            // On the host's clock, like the window it is compared against. It used to be the
+            // pen's, which reports a landing as arriving a tenth of a second or more after the
+            // last hover reading when nothing of the sort happened -- so this number said an
+            // approach was too old to keep while the approach sat inside the window. Traces
+            // before version 6 carry the pen's figure here and it is not a duration.
             if (contact.SinceLastSeen is { } since)
             {
                 json.WriteNumber("lastSeenInTheAirMs", Math.Round(since / 1000.0, 1));

@@ -186,6 +186,26 @@ public partial class MainWindow : Window
     /// Keeping all of it would make the pauses larger in the file than the drawing.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// How much of the pen in the air to keep either side of a stroke, in microseconds
+    /// <b>of the host's clock</b>.
+    /// </summary>
+    /// <remarks>
+    /// Measured on <see cref="Reading.Arrived"/> and never on <see cref="Reading.At"/>. The
+    /// pen's own timestamp advances a flat 4.166 ms per packet whatever the elapsed time and
+    /// jumps forward at each landing by the drift it accumulated since the last one, so ageing
+    /// a hover reading with it asks how old a reading is in units that are not time. A reading
+    /// genuinely 20 ms old measured 2 seconds old, and was discarded.
+    /// <para>
+    /// That is what emptied the approaches this recorder was built to capture. Across the four
+    /// takes that carry both clocks the arithmetic is exact: every stroke either kept its
+    /// approach or had one the pen's clock aged past this window, 93 strokes with nothing else
+    /// involved -- and on the host's clock not one of them exceeds it. The worst case was the
+    /// take recorded specifically to watch a landing, whose five strokes all lost their
+    /// approach to gaps the pen's clock reported as 762 to 2106 ms and which really were 0 to
+    /// 31.
+    /// </para>
+    /// </remarks>
     private const long HoverKept = 250_000;
 
     private readonly Readout _took = new("readings");
@@ -896,14 +916,15 @@ public partial class MainWindow : Window
         _hover.Add(reading);
 
         // Trimmed against the newest reading rather than a wall clock, so this agrees with
-        // the timestamps the file will carry even if the polling falls behind.
-        while (_hover.Count > 0 && reading.At - _hover[0].At > HoverKept) _hover.RemoveAt(0);
+        // the timestamps the file will carry even if the polling falls behind -- on the clock
+        // this application stamped, which is the only one here that measures time.
+        while (_hover.Count > 0 && reading.Arrived - _hover[0].Arrived > HoverKept) _hover.RemoveAt(0);
 
         if (_capture is not (Capture.Between or Capture.Taken)) return;
 
         if (_take?.Current is not { Count: > 0 } just) return;
 
-        if (reading.At - just.Readings[^1].At <= HoverKept) just.Departing(reading);
+        if (reading.Arrived - just.Readings[^1].Arrived <= HoverKept) just.Departing(reading);
     }
 
     /// <summary>
@@ -917,23 +938,24 @@ public partial class MainWindow : Window
     /// </remarks>
     private (IReadOnlyList<Reading> Readings, long? SinceLastSeen, Reading? Last) Approaching(Reading landing)
     {
-        var approach = _hover.Where(seen => landing.At - seen.At <= HoverKept).ToList();
+        var approach = _hover.Where(seen => landing.Arrived - seen.Arrived <= HoverKept).ToList();
 
         // How long ago the pen was last reported in the air, whether or not any of it was
         // inside the window. This is what says why an approach is empty, and an empty
         // approach with no explanation is what three takes in a row produced.
-        var since = _hover.Count > 0 ? landing.At - _hover[^1].At : (long?)null;
+        var since = _hover.Count > 0 ? landing.Arrived - _hover[^1].Arrived : (long?)null;
 
         // Strictly the window, and nothing older. An earlier version kept the most recent
         // airborne reading however old it was, on the reasoning that a device reporting on
         // change says nothing precisely when nothing has changed, so the last reading was
-        // still current. That reasoning was wrong: measured, the pen is moving at 134 to 255
-        // px/s at the moment reporting stops, so a reading from 383 ms earlier describes a
-        // pen that has since travelled an unknown distance.
+        // still current. Both halves of that were wrong, and only one of them was known to be
+        // at the time: the device does not report on change, and there is no moment when
+        // reporting stops.
         //
-        // Why reporting stops is not yet known. Until it is, the honest thing is an empty
-        // approach and an accurate age beside it, rather than a stale reading in an array
-        // whose name says it describes the arrival.
+        // What there is instead is this window, measured on a clock that measures time. On the
+        // pen's clock the landing appears to arrive a tenth of a second or more after the last
+        // hover reading, and the whole approach ages out of a quarter-second window that it
+        // never actually left.
 
         // Cleared, so the next stroke in the take cannot be handed this one's approach. A
         // stroke that lands with nothing in front of it should say so.
