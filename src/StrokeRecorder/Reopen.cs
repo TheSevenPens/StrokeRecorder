@@ -188,8 +188,16 @@ public static class Reopen
     }
 
     /// <summary>A cell of a row, or zero where the column is absent or the row is short.</summary>
+    /// <remarks>
+    /// <b>A null is an absence, not an error.</b> The writer emits null for a column a take
+    /// does not carry -- the host clock on anything recorded before there was one -- and
+    /// calling <c>GetDouble</c> on it throws. Reading a file this tool had written was enough
+    /// to hit it, which is how 33 of 33 published recordings failed a second round trip.
+    /// </remarks>
     private static double Cell(JsonElement row, int column) =>
-        column >= 0 && column < row.GetArrayLength() ? row[column].GetDouble() : 0;
+        column >= 0 && column < row.GetArrayLength() && row[column].ValueKind == JsonValueKind.Number
+            ? row[column].GetDouble()
+            : 0;
 
     private static string Text(JsonElement root, params string[] path)
     {

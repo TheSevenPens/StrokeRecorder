@@ -178,6 +178,21 @@ public static class Trace
             ? take.Readings[0].Arrived
             : take.Aloft.Count > 0 ? take.Aloft[0].Arrived : 0;
 
+        // Whether this take has a host clock at all, decided once for the whole file rather
+        // than per reading.
+        //
+        // Per reading, the test was `Arrived == 0`, and that conflates two different things:
+        // a recording made before the recorder had a second clock, where the absence is real,
+        // and a reading whose arrival happens to be zero -- which after rebasing is the
+        // *first reading of every take*. So a take that had been read back and written out
+        // again emitted a null for its first arrival, and reading that null threw. Every one
+        // of the 33 published recordings failed to survive a second round trip.
+        var hasHostClock = take.Contacts.Any(contact =>
+                               contact.Readings.Any(reading => reading.Arrived != 0)
+                               || contact.Approach.Any(reading => reading.Arrived != 0)
+                               || contact.Departure.Any(reading => reading.Arrived != 0))
+                           || take.Aloft.Any(reading => reading.Arrived != 0);
+
         json.WriteStartArray("strokes");
 
         foreach (var contact in take.Contacts)
@@ -211,13 +226,13 @@ public static class Trace
             if (contact.Approach.Count > 0)
             {
                 json.WritePropertyName("approach");
-                json.WriteRawValue(Rows(contact.Approach, start, began), skipInputValidation: true);
+                json.WriteRawValue(Rows(contact.Approach, start, began, hasHostClock), skipInputValidation: true);
             }
 
             if (contact.Departure.Count > 0)
             {
                 json.WritePropertyName("departure");
-                json.WriteRawValue(Rows(contact.Departure, start, began), skipInputValidation: true);
+                json.WriteRawValue(Rows(contact.Departure, start, began, hasHostClock), skipInputValidation: true);
             }
 
             // Written as raw text, one reading to a line. An indenting writer puts every
@@ -226,7 +241,7 @@ public static class Trace
             // scrolls through and a diff nobody reads. The header stays indented, because
             // that part is read.
             json.WritePropertyName("readings");
-            json.WriteRawValue(Rows(contact.Readings, start, began), skipInputValidation: true);
+            json.WriteRawValue(Rows(contact.Readings, start, began, hasHostClock), skipInputValidation: true);
 
             json.WriteEndObject();
         }
@@ -244,7 +259,7 @@ public static class Trace
                 + "to drop. Not evidence about a stroke.");
 
             json.WritePropertyName("aloft");
-            json.WriteRawValue(Rows(take.Aloft, start, began), skipInputValidation: true);
+            json.WriteRawValue(Rows(take.Aloft, start, began, hasHostClock), skipInputValidation: true);
         }
 
         json.WriteEndObject();
@@ -264,7 +279,13 @@ public static class Trace
     /// origin from <paramref name="start"/> on purpose: the two clocks are unrelated and
     /// rebasing both against one of them would destroy the comparison the column exists for.
     /// </param>
-    private static string Rows(IReadOnlyList<Reading> readings, long start, long began)
+    /// <param name="hasHostClock">
+    /// Whether this take carries a host clock at all. A property of the take rather than of a
+    /// reading: rebasing makes the first arrival of every take zero, so a per-reading test for
+    /// zero calls that reading's real timestamp missing.
+    /// </param>
+    private static string Rows(
+        IReadOnlyList<Reading> readings, long start, long began, bool hasHostClock)
     {
         if (readings.Count == 0) return "[]";
 
@@ -277,7 +298,7 @@ public static class Trace
 
             rows.Append("        [")
                 .Append(reading.At - start).Append(", ")
-                .Append(reading.Arrived == 0 ? "null" : (reading.Arrived - began).ToString()).Append(", ")
+                .Append(hasHostClock ? (reading.Arrived - began).ToString() : "null").Append(", ")
                 .Append(Round(reading.X, 3)).Append(", ")
                 .Append(Round(reading.Y, 3)).Append(", ")
                 .Append(reading.Pressure).Append(", ")

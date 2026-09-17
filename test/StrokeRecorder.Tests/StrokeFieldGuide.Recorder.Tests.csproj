@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The recorder's first tests.
+
+    It had none: 6,438 lines, and the only thing anything checked was that it compiled. What
+    made that costly is that the recorder is the instrument — every measurement this guide
+    makes about real hardware came out of it, and the recordings it writes are published.
+
+    A reference on the application is enough. Nothing here needs a tablet or a window: Take,
+    Trace and Reopen are plain data, and what they do with readings they are given is exactly
+    what was never checked.
+  -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>StrokeFieldGuide.Recorder.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\app\StrokeFieldGuide.Recorder\StrokeFieldGuide.Recorder.csproj" />
+  </ItemGroup>
+
+</Project>
