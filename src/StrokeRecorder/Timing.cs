@@ -1,4 +1,4 @@
-using StrokeFieldGuide.Strokes;
+using StrokeKit.Strokes;
 
 namespace StrokeFieldGuide.Recorder;
 

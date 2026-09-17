@@ -1,7 +1,7 @@
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
-using StrokeFieldGuide.Strokes;
+using StrokeKit.Strokes;
 
 // This project has a Pen of its own -- the backends -- and it is not this one.
 using Stroke = Avalonia.Media.Pen;

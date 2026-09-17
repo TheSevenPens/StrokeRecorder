@@ -13,12 +13,12 @@ using Avalonia.Platform.Storage;
 using Avalonia.Media;
 using WinPenKit.Diagnostics;
 using SkiaSharp;
-using StrokeFieldGuide.Brushes;
-using Nib = StrokeFieldGuide.Brushes.Brush;
-using StrokeFieldGuide.Canvas;
-using StrokeFieldGuide.Strokes;
-using StrokeFieldGuide.Surfaces;
-using StrokeFieldGuide.Views;
+using StrokeKit.Brushes;
+using Nib = StrokeKit.Brushes.Brush;
+using StrokeKit.Avalonia;
+using StrokeKit.Strokes;
+using StrokeKit.Surfaces;
+using StrokeKit.Views;
 using WinPenKit;
 
 namespace StrokeFieldGuide.Recorder;
@@ -797,7 +797,7 @@ public partial class MainWindow : Window
         _diameter, colour ?? Ink, 0.25, Buildup.PerStamp,
         new Width(Math.Min(0.5, _diameter / 20), _diameter, (uint)Math.Max(1, fullScale)),
         SpacedBy.Diameters,
-        Nib: _round ? null : new StrokeFieldGuide.Brushes.Nib(0.3, 0, Held.ToTheLean));
+        Nib: _round ? null : new StrokeKit.Brushes.Nib(0.3, 0, Held.ToTheLean));
 
     // ── step three ──────────────────────────────────────────────────────────────
 

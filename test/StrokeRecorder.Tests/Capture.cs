@@ -1,6 +1,6 @@
 using StrokeFieldGuide.Recorder;
-using StrokeFieldGuide.Strokes;
-using StrokeFieldGuide.Surfaces;
+using StrokeKit.Strokes;
+using StrokeKit.Surfaces;
 using WinPenKit;
 
 namespace StrokeFieldGuide.Recorder.Tests;

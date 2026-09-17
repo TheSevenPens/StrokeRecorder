@@ -1,6 +1,6 @@
 using System.Text;
 using System.Text.Json;
-using StrokeFieldGuide.Strokes;
+using StrokeKit.Strokes;
 
 namespace StrokeFieldGuide.Recorder;
 

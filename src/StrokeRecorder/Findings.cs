@@ -1,4 +1,4 @@
-using StrokeFieldGuide.Strokes;
+using StrokeKit.Strokes;
 using WinPenKit;
 
 namespace StrokeFieldGuide.Recorder;

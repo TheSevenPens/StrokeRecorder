@@ -2,7 +2,7 @@ using Avalonia.Controls;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
 using Avalonia.Threading;
-using StrokeFieldGuide.Strokes;
+using StrokeKit.Strokes;
 
 namespace StrokeFieldGuide.Recorder;
 
