@@ -63,7 +63,11 @@ public static class Trace
     /// both shapes: a top-level <c>readings</c> is a take of one stroke.
     /// </para>
     /// </remarks>
-    public const int Version = 4;
+    /// <remarks>
+    /// Version five adds <c>arrived</c>: the host clock, beside the pen's own. Four columns of
+    /// version four are unchanged and a reader of either can take both.
+    /// </remarks>
+    public const int Version = 5;
 
     /// <summary>What goes in, in order, so a reader does not have to guess at the tuples.</summary>
     /// <remarks>
@@ -72,7 +76,15 @@ public static class Trace
     /// once.
     /// </remarks>
     public static readonly string[] Columns =
-        ["at", "x", "y", "pressure", "height", "status", "lean", "azimuth", "twist"];
+        ["at", "arrived", "x", "y", "pressure", "height", "status", "lean", "azimuth", "twist"];
+
+    /// <summary>What the two clocks are, said in the file so a reader need not be told.</summary>
+    public const string Clocks =
+        "'at' is the pen's own timestamp and 'arrived' is this application's clock, both in "
+        + "microseconds from the take's first reading. They are independent: a difference in "
+        + "'at' with no matching difference in 'arrived' is the device stamping a packet late, "
+        + "not the pen falling silent. Readings that reached the application in the same poll "
+        + "share an 'arrived' exactly.";
 
     public static string Write(Take take, string folder, string name)
     {
@@ -134,6 +146,8 @@ public static class Trace
         json.WriteNumber("originY", take.Placed.OriginY);
         json.WriteEndObject();
 
+        json.WriteString("clocks", Clocks);
+
         json.WriteStartArray("columns");
         foreach (var column in Columns) json.WriteStringValue(column);
         json.WriteEndArray();
@@ -148,6 +162,13 @@ public static class Trace
         var start = take.Count > 0
             ? take.Readings[0].At
             : take.Aloft.Count > 0 ? take.Aloft[0].At : 0;
+
+        // The same reading, on the other clock. Rebased separately because the two origins are
+        // unrelated -- one is a device tick and the other is this process starting -- and
+        // subtracting a shared start would leave one of the columns meaningless.
+        var began = take.Count > 0
+            ? take.Readings[0].Arrived
+            : take.Aloft.Count > 0 ? take.Aloft[0].Arrived : 0;
 
         json.WriteStartArray("strokes");
 
@@ -176,13 +197,13 @@ public static class Trace
             if (contact.Approach.Count > 0)
             {
                 json.WritePropertyName("approach");
-                json.WriteRawValue(Rows(contact.Approach, start), skipInputValidation: true);
+                json.WriteRawValue(Rows(contact.Approach, start, began), skipInputValidation: true);
             }
 
             if (contact.Departure.Count > 0)
             {
                 json.WritePropertyName("departure");
-                json.WriteRawValue(Rows(contact.Departure, start), skipInputValidation: true);
+                json.WriteRawValue(Rows(contact.Departure, start, began), skipInputValidation: true);
             }
 
             // Written as raw text, one reading to a line. An indenting writer puts every
@@ -191,7 +212,7 @@ public static class Trace
             // scrolls through and a diff nobody reads. The header stays indented, because
             // that part is read.
             json.WritePropertyName("readings");
-            json.WriteRawValue(Rows(contact.Readings, start), skipInputValidation: true);
+            json.WriteRawValue(Rows(contact.Readings, start, began), skipInputValidation: true);
 
             json.WriteEndObject();
         }
@@ -209,7 +230,7 @@ public static class Trace
                 + "to drop. Not evidence about a stroke.");
 
             json.WritePropertyName("aloft");
-            json.WriteRawValue(Rows(take.Aloft, start), skipInputValidation: true);
+            json.WriteRawValue(Rows(take.Aloft, start, began), skipInputValidation: true);
         }
 
         json.WriteEndObject();
@@ -224,7 +245,12 @@ public static class Trace
     /// difference between two of them is meaningful and one on its own is not, and the
     /// differences worth keeping include the ones that span a pen lift.
     /// </param>
-    private static string Rows(IReadOnlyList<Reading> readings, long start)
+    /// <param name="began">
+    /// The same reading's arrival, which the <c>arrived</c> column is measured from. A separate
+    /// origin from <paramref name="start"/> on purpose: the two clocks are unrelated and
+    /// rebasing both against one of them would destroy the comparison the column exists for.
+    /// </param>
+    private static string Rows(IReadOnlyList<Reading> readings, long start, long began)
     {
         if (readings.Count == 0) return "[]";
 
@@ -237,6 +263,7 @@ public static class Trace
 
             rows.Append("        [")
                 .Append(reading.At - start).Append(", ")
+                .Append(reading.Arrived == 0 ? "null" : (reading.Arrived - began).ToString()).Append(", ")
                 .Append(Round(reading.X, 3)).Append(", ")
                 .Append(Round(reading.Y, 3)).Append(", ")
                 .Append(reading.Pressure).Append(", ")

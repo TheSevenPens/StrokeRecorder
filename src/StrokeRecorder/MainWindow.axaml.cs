@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.IO;
 using Avalonia;
@@ -656,7 +657,7 @@ public partial class MainWindow : Window
     /// in step one -- reopening for the take would mean the thing that was checked and the
     /// thing that recorded were two different sessions.
     /// </remarks>
-    private void Route(PenPoint point, IPenSession session)
+    private void Route(PenPoint point, IPenSession session, long arrived)
     {
         if (_step == 1)
         {
@@ -665,12 +666,12 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_step == 3) Record(point, session);
+        if (_step == 3) Record(point, session, arrived);
     }
 
-    private void Record(PenPoint point, IPenSession session)
+    private void Record(PenPoint point, IPenSession session, long arrived)
     {
-        var reading = Reported(point);
+        var reading = Reported(point, arrived);
 
         _take?.Routing(reading.At);
 
@@ -1951,6 +1952,23 @@ public partial class MainWindow : Window
         Refresh();
     }
 
+    /// <summary>
+    /// Microseconds on a clock this application owns, for stamping when a reading arrived.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Not <see cref="Environment.TickCount64"/>, which moves in steps of about 16 ms on
+    /// Windows -- the same order as the poll it would be measuring, so a gap of one poll and a
+    /// gap of none would read alike. <see cref="Stopwatch"/> is monotonic and does not step.
+    /// </para>
+    /// <para>
+    /// Static, so every reading in a session is on one origin. The origin itself is
+    /// meaningless; the differences are the point, and the trace rebases them anyway.
+    /// </para>
+    /// </remarks>
+    private static long Arrival() =>
+        (long)(Stopwatch.GetTimestamp() * (1_000_000.0 / Stopwatch.Frequency));
+
     private void Drain()
     {
         if (_session is not { IsRunning: true } session) return;
@@ -1971,7 +1989,13 @@ public partial class MainWindow : Window
 
         var before = _take?.Count ?? 0;
 
-        foreach (var point in points) Route(point, session);
+        // One stamp for the batch, deliberately. Every reading that came across together
+        // carries the same arrival, so "did these two packets reach the application in the
+        // same poll" is answered by comparing two numbers for equality rather than by
+        // reasoning about a 16 ms timer's resolution.
+        var arrived = Arrival();
+
+        foreach (var point in points) Route(point, session, arrived);
 
         // One poll, however many readings it brought. Counted here rather than inside the
         // per-reading path, which would count readings twice under another name.
@@ -2091,7 +2115,7 @@ public partial class MainWindow : Window
     /// nothing checks, and both of the ways this window once put marks in the wrong place
     /// were arithmetic written in this file.
     /// </remarks>
-    private static Reading Reported(PenPoint point) =>
+    private static Reading Reported(PenPoint point, long arrived = 0) =>
         new(point.DesktopX, point.DesktopY, point.Pressure, point.TimestampMicroseconds,
             // Altitude counts up from the tablet and a lean counts away from vertical, so
             // one is the other subtracted from a right angle. Azimuth and twist come across
@@ -2109,7 +2133,12 @@ public partial class MainWindow : Window
             // which nothing has ever read; and what bit 0 actually means, since asking
             // IsInProximity for it rejected every hovering reading on this driver.
             Status: point.Status,
-            Lean: 90 - point.Altitude, Azimuth: point.Azimuth, Twist: point.Twist);
+            Lean: 90 - point.Altitude, Azimuth: point.Azimuth, Twist: point.Twist,
+
+            // The host clock, stamped by whoever pulled this packet out of the session. The
+            // pen's own timestamp above is the only one a trace has ever carried, and a gap
+            // in it cannot be told apart from a gap in delivery without a second opinion.
+            Arrived: arrived);
 
     private void Wipe()
     {

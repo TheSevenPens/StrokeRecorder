@@ -42,7 +42,7 @@ public static class Findings
         var found = new List<Finding>();
 
         Delivered(found, take);
-        Stillness(found, take);
+        Clocks(found, take);
         Status(found, take);
 
         Series(found, take);
@@ -59,78 +59,6 @@ public static class Findings
         Named(found, take);
 
         return found;
-    }
-
-    /// <summary>
-    /// How fast the pen was travelling across each gap in reporting, which is the claim.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Measured as a <b>speed</b> and not a distance, which is the second version of this
-    /// check. The first asked whether the pen moved less than a pixel across a gap, on the
-    /// strength of eighteen of twenty-one gaps that did -- a threshold chosen after seeing the
-    /// data it described. The next take recorded broke it: six of eleven gaps moved 1.9 to 3.7
-    /// px, all of them short, and a fixed distance is the wrong test for a quantity that scales
-    /// with duration.
-    /// </para>
-    /// <para>
-    /// As a speed it holds. Across every gap over 100 ms recorded so far the pen travels at a
-    /// median of 1 px per second and never above 18, against a median of 261 while the device
-    /// is reporting -- between twenty and a thousand times slower. Thirty px per second is the
-    /// line drawn here, above the worst seen and far below anything the hand does while moving.
-    /// </para>
-    /// <para>
-    /// It is a <b>necessary</b> condition and not a sufficient one: the pen is often equally
-    /// still while reporting continues, so this can fail the claim and cannot confirm it.
-    /// </para>
-    /// </remarks>
-    private static void Stillness(List<Finding> found, Take take)
-    {
-        const double Crawling = 30;
-
-        var gaps = new List<(double Ms, double Moved, double Speed)>();
-
-        foreach (var contact in take.Contacts)
-        {
-            if (contact.SinceLastSeen is not { } since || contact.LastAirborne is not { } last) continue;
-            if (contact.Count == 0) continue;
-
-            var landing = contact.Readings[0];
-            var moved = Math.Sqrt(Math.Pow(landing.X - last.X, 2) + Math.Pow(landing.Y - last.Y, 2));
-
-            gaps.Add((since / 1000.0, moved, moved / (since / 1_000_000.0)));
-        }
-
-        // Under 100 ms is one or two polls: the pen has had no time to be still or to move,
-        // and a speed computed over it is mostly noise.
-        var real = gaps.Where(gap => gap.Ms > 100).ToList();
-
-        if (real.Count == 0)
-        {
-            if (gaps.Count > 0)
-            {
-                found.Add(new(Tone.Plain, "No gap here lasted longer than 100 ms",
-                    $"{gaps.Count} gap{(gaps.Count == 1 ? "" : "s")}, the longest {gaps.Max(g => g.Ms):F0} ms. "
-                    + "Too short to say anything about how fast the pen was moving."));
-            }
-
-            return;
-        }
-
-        var fast = real.Where(gap => gap.Speed >= Crawling).ToList();
-
-        found.Add(new(fast.Count == 0 ? Tone.Good : Tone.Warn,
-            fast.Count == 0
-                ? $"The pen was crawling across all {real.Count} gap{(real.Count == 1 ? "" : "s")}"
-                : $"{fast.Count} of {real.Count} gaps had the pen still moving",
-            $"Gaps over 100 ms: {real.Min(g => g.Ms):F0} to {real.Max(g => g.Ms):F0} ms, the pen "
-            + $"travelling {real.Min(g => g.Speed):F1} to {real.Max(g => g.Speed):F1} px per second "
-            + $"across them. "
-            + (fast.Count == 0
-                ? $"Everything recorded so far stays under {Crawling:F0}, against a median of 261 "
-                  + "while the device is reporting."
-                : $"Above {Crawling:F0} px per second is faster than any gap measured so far, and "
-                  + "is the observation worth keeping rather than repeating.")));
     }
 
     /// <summary>
@@ -169,6 +97,150 @@ public static class Findings
             + (seen.Count > 8 ? ", …" : "")
             + $". In contact it is {Bits(take.Readings)}; in the air {Bits(take.Aloft)}."));
     }
+
+
+    /// <summary>
+    /// Whether the pen went quiet before a stroke, or only appears to have.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The gap this measures had a <c>Stillness</c> check above it, asking how fast the pen was
+    /// travelling across each one. That check is gone: its 30 px/s line was fitted to the gaps
+    /// themselves, and a speed over a span of time that did not pass is not a speed. Every
+    /// trace before version five carried one clock -- the pen's -- and on that clock the
+    /// airborne record stops for a tenth of a second or more before almost every landing. Three
+    /// explanations for that were written into the notes and all three were withdrawn, and the
+    /// reason they could be written at all is that a single clock cannot distinguish a device
+    /// that stopped sending from a device that sent on time and stamped the packet late.
+    /// </para>
+    /// <para>
+    /// Two clocks can. The recorder drains in batches, so readings that reached the application
+    /// in one poll carry an identical arrival: if the last reading in the air and the first
+    /// reading in contact came across together, no packet was ever late and the gap is in the
+    /// pen's timestamp. There is no appeal to resolution in that -- it is two numbers being
+    /// equal.
+    /// </para>
+    /// </remarks>
+    private static void Clocks(List<Finding> found, Take take)
+    {
+        // A landing with the pen seen in the air immediately before it. Anything else has
+        // nothing to compare: a stroke with no approach is a stroke this cannot speak about.
+        var landings = take.Contacts
+            .Where(contact => contact.Approach.Count > 0 && contact.Count > 0)
+            .Select(contact => (Air: contact.Approach[^1], Ink: contact.Readings[0]))
+            .Where(pair => pair.Air.Arrived > 0 && pair.Ink.Arrived > 0)
+            .Select(pair => (
+                Device: pair.Ink.At - pair.Air.At,
+                Host: pair.Ink.Arrived - pair.Air.Arrived))
+            .ToList();
+
+        if (landings.Count == 0) return;
+
+        // Before believing either clock, check the new one is a clock. A stamp that never
+        // moves reports every gap as the device's fault, and a stamp that moves on every
+        // reading reports none of them -- both are wrong in the direction of whatever was
+        // asked, and neither would look wrong in the output. So the take has to show the
+        // property the batching gives it: many readings, sharing arrivals, over more than one
+        // poll. This is the packet-counter lesson written down again: a broken instrument
+        // should say nothing rather than say something.
+        var all = take.Readings.Concat(take.Aloft).Where(reading => reading.Arrived > 0).ToList();
+
+        if (all.Count >= 50)
+        {
+            var arrivals = all.Select(reading => reading.Arrived).Distinct().Count();
+            var elapsed = all.Max(reading => reading.Arrived) - all.Min(reading => reading.Arrived);
+
+            if (arrivals <= 1 || elapsed < PollMicroseconds)
+            {
+                found.Add(new(Tone.Warn, "The arrival clock is not running, so the two clocks say nothing",
+                    $"{all.Count} readings carry {arrivals} distinct arrival"
+                    + $"{(arrivals == 1 ? "" : "s")} spanning {Ms(elapsed)}, which cannot happen "
+                    + "if each poll stamps its own batch. Whatever is wrong is in the recorder, "
+                    + "not the pen. Nothing below about the pen's clock is worth reading."));
+
+                return;
+            }
+
+            if (arrivals == all.Count)
+            {
+                found.Add(new(Tone.Warn, "Every reading has its own arrival, which the recorder cannot produce",
+                    $"All {all.Count} of them differ, but they are drained in batches and a "
+                    + "batch is stamped once. The stamp is being taken per reading somewhere, "
+                    + "so two readings arriving together no longer look like it -- which is the "
+                    + "only thing this comparison relies on."));
+
+                return;
+            }
+        }
+
+        // Five times the 4 ms a packet interval actually runs at. Not tuned: the gaps this is
+        // about are a hundred milliseconds and more, and anything between 20 ms and that is a
+        // case nobody has recorded yet and would want to look at by hand anyway.
+        const long Quiet = 20_000;
+
+        var silent = landings.Where(landing => landing.Device > Quiet).ToList();
+
+        if (silent.Count == 0)
+        {
+            found.Add(new(Tone.Good, "The pen reported continuously into every landing",
+                $"On all {landings.Count} of them the pen's own clock runs straight from the "
+                + "last reading in the air into the first in contact. Nothing here needs the "
+                + "second clock to explain it."));
+
+            return;
+        }
+
+        // The whole test. One poll delivered both packets, so whatever the pen's clock says
+        // happened between them, no time passed in which this application could have been
+        // waiting.
+        var together = silent.Count(landing => landing.Host == 0);
+
+        // Two polls. The batch boundary has to fall somewhere, and a landing that misses it by
+        // one is not evidence of a stall.
+        var prompt = silent.Count(landing => landing.Host <= 2 * PollMicroseconds);
+
+        var worst = silent.OrderByDescending(landing => landing.Device).First();
+
+        var span = $"The pen's clock loses {Ms(silent.Min(l => l.Device))} to "
+            + $"{Ms(silent.Max(l => l.Device))} before a landing";
+
+        if (together == silent.Count)
+        {
+            found.Add(new(Tone.Good,
+                $"The pen never went quiet -- its clock did, on all {silent.Count} landings",
+                span + ", and on every one of them the last reading in the air and the first "
+                + "reading in contact arrived here in the same poll. No packet was late and "
+                + "none is missing: the device stamped the contact packet with a time it did "
+                + "not arrive at. Anything measured from gaps in 'at' -- how still the pen was, "
+                + "how long it hovered, when it touched down -- is measuring the stamp."));
+        }
+        else if (prompt > silent.Count / 2)
+        {
+            found.Add(new(Tone.Warn,
+                $"{prompt} of {silent.Count} gaps are in the pen's clock, not in the reporting",
+                span + $". {together} of them arrived in a single poll and {prompt} within two, "
+                + "which is the device stamping late rather than falling silent. The rest took "
+                + $"real time to arrive -- the largest gap, {Ms(worst.Device)} on the pen's "
+                + $"clock, took {Ms(worst.Host)} on this one. Two mechanisms, and this take "
+                + "does not separate which landings had which."));
+        }
+        else
+        {
+            found.Add(new(Tone.Warn,
+                $"The pen really did stop reporting before {silent.Count - prompt} landings",
+                span + ", and this application waited out most of it: only "
+                + $"{prompt} of {silent.Count} arrived within two polls. Packets were not "
+                + "merely stamped late, they were not there to be drained. Whether they were "
+                + "never sent or were dropped before delivery is a question for the driver's "
+                + "own counters, not for these two clocks."));
+        }
+    }
+
+    /// <summary>The recorder's poll, in microseconds. A gap smaller than one is not a gap.</summary>
+    private const long PollMicroseconds = 16_000;
+
+    private static string Ms(long microseconds) =>
+        $"{microseconds / 1000.0:0.#} ms";
 
     private static string Bits(IEnumerable<Reading> readings)
     {
