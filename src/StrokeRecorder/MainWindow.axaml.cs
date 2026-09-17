@@ -184,7 +184,16 @@ public partial class MainWindow : Window
 
     private Gesture? _gesture;
 
-    private Capture _capture = Capture.Idle;
+    /// <summary>
+    /// The recording state machine, which used to be spread through this file.
+    /// </summary>
+    /// <remarks>
+    /// Extracted on #85. What it decides is testable without a window or a tablet; what this
+    /// window does about it -- ink, readouts, which step is shown -- stays here.
+    /// </remarks>
+    private readonly Capturing _capturing;
+
+    private Capture _capture => _capturing.State;
 
     /// <summary>Where the take was written, once it has been. Null until then.</summary>
     private string? _saved;
@@ -201,29 +210,7 @@ public partial class MainWindow : Window
     /// file named after no tablet at all.
     /// </remarks>
     private string _suggested = "";
-    private Take? _take;
-
-    /// <summary>
-    /// The pen in the air, kept for a quarter of a second in case it lands.
-    /// </summary>
-    /// <remarks>
-    /// Held on the window rather than on the take, because the readings that matter most
-    /// arrive <b>before</b> the take exists: a take is created by the first contact, and the
-    /// approach to that contact is already over by then.
-    /// </remarks>
-    private readonly List<Reading> _hover = [];
-
-    /// <summary>
-    /// Airborne readings kept before a take exists, for the debugging option only.
-    /// </summary>
-    /// <remarks>
-    /// The same reason <see cref="_hover"/> lives here: a take is created by the first
-    /// contact, and what the pen did on the way to it is already over by then.
-    /// </remarks>
-    private readonly List<Reading> _aloft = [];
-
-    /// <summary>The session's own counts when the take was armed, to subtract from later.</summary>
-    private (long, long, long)? _armedAt;
+    private Take? _take => _capturing.Take;
 
     /// <summary>
     /// Which session those counts came from, so the subtraction can refuse to span two.
@@ -382,6 +369,10 @@ public partial class MainWindow : Window
         this.FindControl<Panel>("ReviewHost")!.Children.Add(_replay);
 
         _pad = new PenPad(1200, 700);
+
+        // Made here because it needs the pad: a take freezes the transform it was drawn
+        // through, and the pad is what knows it.
+        _capturing = new Capturing(() => _pad.ForPen());
         _pad.Grew += (_, _) => Regrown();
 
         // The same treatment for the review pad, and for the same reason. Without it a stroke
@@ -839,292 +830,45 @@ public partial class MainWindow : Window
         if (_step == 3) Record(point, session, arrived);
     }
 
+    /// <summary>
+    /// One reading, given to the capture, and whatever it asks for afterwards.
+    /// </summary>
+    /// <remarks>
+    /// The state machine this used to carry is <see cref="Capturing"/>. What is left is the
+    /// half that needs a window: ink on the pad, the readouts, and which step is shown.
+    /// </remarks>
     private void Record(PenPoint point, IPenSession session, long arrived)
     {
         var reading = Reported(point, arrived);
 
-        _take?.Routing(reading.At);
+        var what = _capturing.Took(reading, _pad.Covers(reading.X, reading.Y));
 
-        // The pen in the air. Kept whenever a take could be affected by it: before one starts,
-        // between its strokes, and for a moment after the last one -- and dropped the instant
-        // the tip goes down, because from there the stroke itself is the record.
-        if (!reading.InContact)
+        if (what.Forget)
         {
-            // Unfiltered and before anything else, because the whole point of the option is to
-            // see what the recorder is choosing to drop.
-            if (Keeping)
-            {
-                // Asked on every reading, not once when the take was armed. The switch is on
-                // the same screen as the recording and there is no reason somebody cannot
-                // reach for it halfway through.
-                if (_take is null) _aloft.Add(reading); else _take.Keep(reading);
-            }
+            foreach (var readout in Taken) readout.Forget();
 
-            if (Airborne(reading)) Hovering(reading);
+            _takeGauges.Forget();
         }
 
-        // Only over the pad. A tablet reports the pen wherever it is, so without this the tap
-        // that presses Arm is itself recorded as a stroke -- it armed, took a two-reading
-        // take from the same tap, and read as the button un-arming itself.
-        //
-        // A pen that wanders off the pad mid-stroke ends the take, which is the same thing
-        // the tip lifting does and is the honest reading of it: what happened after that is
-        // not on this drawing.
-        if (!_pad.Covers(reading.X, reading.Y))
+        if (what.Wipe)
         {
-            if (_capture == Capture.Drawing)
-            {
-                _take!.Current!.EndedBy = "the pen left the pad";
+            _opened = null;
 
-                // On a many-stroke take this ends the stroke and not the take. Wandering off
-                // the pad is the same event as a lift for the stroke being drawn, and the
-                // take is only over when somebody says it is.
-                if (_take.Gesture.ManyStrokes)
-                {
-                    _capture = Capture.Between;
-                }
-                else
-                {
-                    _take.EndedBy = "the pen left the pad";
-                    _capture = Capture.Taken;
-                }
-
-                _haveLast = false;
-
-                Stage();
-            }
-
-            // Counted, because this is the one path that reaches here and stores nothing.
-            // An airborne reading was already kept above; a reading with the tip down that
-            // lands off the pad is dropped entirely, and until this tally existed there was
-            // no way to tell that from the device going quiet.
-            if (reading.InContact) _take?.DroppedOne();
-
-            return;
+            _pad.Clear();
+            DrawGuide();
         }
 
-        // Written as ifs rather than a switch on purpose. The first version used `goto case
-        // Capture.Drawing` to fall from the first contact into the collecting branch, and C#
-        // sent it to the *unguarded* Drawing label -- the one that handles the pen lifting.
-        // So every take ended on the reading that started it: nought readings, state Taken,
-        // and a window that looked like it had recorded something.
-        if (_capture == Capture.Armed && reading.InContact)
+        if (what.Drew)
         {
-            // The transform is taken here, once, and every reading in this take is placed
-            // through it. See Take for why it cannot be taken at save time.
-            // Already made, if arming made it. A many-stroke take exists from the moment it
-            // was armed and the first contact adds a stroke to it rather than creating it.
-            _take ??= new Take(_gesture!, session.Api, session.MaxPressure, _pad.ForPen())
-            {
-                Conventions = session.Conventions.ToString() ?? "",
-            };
-            _take.KeepAll(_aloft);
-            _aloft.Clear();
-            var opening = Approaching(reading);
-            _take.Begin().Approaching(opening.Readings, opening.SinceLastSeen, opening.Last);
+            Lay(_pad, point, session.MaxPressure, _take!.Placed);
 
-            _capture = Capture.Drawing;
-            _haveLast = false;
+            _took.Saw(_take.Count);
+            _lasted.Saw(_take.Milliseconds);
+
+            Tick();
         }
 
-        if (_capture == Capture.Drawing)
-        {
-            if (reading.InContact)
-            {
-                _take!.Add(reading);
-
-                Lay(_pad, point, session.MaxPressure, _take.Placed);
-
-                _took.Saw(_take.Count);
-                _lasted.Saw(_take.Milliseconds);
-
-                Tick();
-            }
-            else
-            {
-                // The tip lifted. For most gestures that is the end of the take and needs no
-                // button; for a many-stroke one it is the end of a stroke and nothing more.
-                _capture = _take!.Gesture.ManyStrokes ? Capture.Between : Capture.Taken;
-                _haveLast = false;
-            }
-        }
-        else if (_capture == Capture.Between && reading.InContact)
-        {
-            // Another stroke in the same take. Nothing is cleared and nothing is reset: the
-            // pad keeps what is already on it, so the series accumulates into one picture,
-            // and the clock keeps running so the gap between the strokes stays measurable.
-            var next = _take!.Begin();
-
-            var coming = Approaching(reading);
-            next.Approaching(coming.Readings, coming.SinceLastSeen, coming.Last);
-            next.Add(reading);
-
-            Lay(_pad, point, session.MaxPressure, _take.Placed);
-
-            _capture = Capture.Drawing;
-            _haveLast = false;
-        }
-        else if (_capture == Capture.Taken && reading.InContact)
-        {
-            // Drawing again after a take starts the next one, with no button in between.
-            // Pressing Arm for every stroke is the wrong shape for what somebody recording
-            // actually does, which is draw, look, draw again.
-            //
-            // The previous take is held right up to this moment rather than thrown away when
-            // the last one finished, so a take is only lost by starting another -- and a
-            // reader who wants to keep it presses Next before putting the pen down.
-            //
-            // Never on a many-stroke gesture, and this is the whole of the "it stops and
-            // restarts" fault. Stopping one of those with the tip still down leaves the state
-            // Taken while the pen is still in contact, so the very next reading four
-            // milliseconds later arrived here and began a fresh recording. The stop worked
-            // perfectly every time; a new take replaced it before anybody could see.
-            //
-            // A many-stroke take is armed deliberately, and stopped deliberately. Drawing
-            // after it has been stopped is somebody finishing their stroke, not asking for
-            // another recording.
-            if (_gesture is { ManyStrokes: true })
-            {
-                // Counted, not merely discarded. These readings were handed to this window and
-                // are deliberately not kept, and a take whose received count exceeds what it
-                // stored looks exactly like data going missing -- which is the question this
-                // recorder exists to answer honestly.
-                _take!.OneAfterTheStop();
-
-                Stage();
-
-                return;
-            }
-
-            Restart(session, reading);
-
-            _take!.Add(reading);
-
-            Lay(_pad, point, session.MaxPressure, _take.Placed);
-        }
-
-        Stage();
-    }
-
-    /// <summary>
-    /// Whether an airborne reading is the pen being somewhere, or the pen being gone.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// A Wintab device stops reporting when the pen is lifted out of range, and the last
-    /// packet before it goes is not a measurement: the position repeats the one before it and
-    /// the orientation comes back as an altitude of 90 and an azimuth of 0 -- a pen standing
-    /// perfectly upright and aimed due north, at the moment there is no pen. Kept, that is a
-    /// false vertical at the end of every departure, in the one array whose purpose is to say
-    /// how the pen left.
-    /// </para>
-    /// <para>
-    /// <b>Recognised by what it is, and not by the session's proximity flag.</b> That was
-    /// tried first and is why this comment is long. <c>WintabDigitizerSession</c> declares
-    /// <c>PenCapabilities.Proximity</c> and fills <c>Status</c> from the packet's
-    /// <c>pkStatus</c>, so asking <c>IsInProximity</c> looks like the clean answer -- but on
-    /// this driver bit zero is not set on ordinary hover packets, so the guard rejected
-    /// <b>every</b> airborne reading and a whole recording came back with no approach and no
-    /// departure at all. The capability is declared; the bit does not mean what the property
-    /// assumes. Filed against WinPenKit rather than worked around there.
-    /// </para>
-    /// <para>
-    /// So all three of the artefact's marks are required together: no lean, no azimuth, and a
-    /// position identical to the reading before it. A real pen would have to be exactly
-    /// vertical, exactly north and exactly still to be dropped by this, and it would be one
-    /// hover reading. That is the limit, and it is worth stating rather than implying the test
-    /// is exact.
-    /// </para>
-    /// </remarks>
-    private bool Airborne(Reading reading) =>
-        reading.Lean != 0
-        || reading.Azimuth != 0
-        || _hover.Count == 0
-        || _hover[^1].X != reading.X
-        || _hover[^1].Y != reading.Y;
-
-    /// <summary>
-    /// Keeps one airborne reading, and forgets any that are now too old to matter.
-    /// </summary>
-    /// <remarks>
-    /// Also the other half of the departure: while the state is Between or Taken there is a
-    /// stroke that has just ended, and a reading arriving within the window belongs to it.
-    /// </remarks>
-    private void Hovering(Reading reading)
-    {
-        _hover.Add(reading);
-
-        // Trimmed against the newest reading rather than a wall clock, so this agrees with
-        // the timestamps the file will carry even if the polling falls behind -- on the clock
-        // this application stamped, which is the only one here that measures time.
-        while (_hover.Count > 0 && reading.Arrived - _hover[0].Arrived > HoverKept) _hover.RemoveAt(0);
-
-        if (_capture is not (Capture.Between or Capture.Taken)) return;
-
-        if (_take?.Current is not { Count: > 0 } just) return;
-
-        if (reading.Arrived - just.Readings[^1].Arrived <= HoverKept) just.Departing(reading);
-    }
-
-    /// <summary>
-    /// The airborne readings within the window before a landing, oldest first.
-    /// </summary>
-    /// <remarks>
-    /// Measured back from the landing itself rather than from the newest reading held, which
-    /// are not the same instant: the pen can hover a while and then be reported in contact
-    /// several milliseconds later, and the window a reader cares about ends where the stroke
-    /// begins.
-    /// </remarks>
-    private (IReadOnlyList<Reading> Readings, long? SinceLastSeen, Reading? Last) Approaching(Reading landing)
-    {
-        var approach = _hover.Where(seen => landing.Arrived - seen.Arrived <= HoverKept).ToList();
-
-        // How long ago the pen was last reported in the air, whether or not any of it was
-        // inside the window. This is what says why an approach is empty, and an empty
-        // approach with no explanation is what three takes in a row produced.
-        var since = _hover.Count > 0 ? landing.Arrived - _hover[^1].Arrived : (long?)null;
-
-        // Strictly the window, and nothing older. An earlier version kept the most recent
-        // airborne reading however old it was, on the reasoning that a device reporting on
-        // change says nothing precisely when nothing has changed, so the last reading was
-        // still current. Both halves of that were wrong, and only one of them was known to be
-        // at the time: the device does not report on change, and there is no moment when
-        // reporting stops.
-        //
-        // What there is instead is this window, measured on a clock that measures time. On the
-        // pen's clock the landing appears to arrive a tenth of a second or more after the last
-        // hover reading, and the whole approach ages out of a quarter-second window that it
-        // never actually left.
-
-        // Cleared, so the next stroke in the take cannot be handed this one's approach. A
-        // stroke that lands with nothing in front of it should say so.
-        var last = _hover.Count > 0 ? _hover[^1] : (Reading?)null;
-
-        _hover.Clear();
-
-        return (approach, since, last);
-    }
-
-    /// <summary>Begins a take where one has just finished, on the same gesture.</summary>
-    private void Restart(IPenSession session, Reading landing)
-    {
-        foreach (var readout in Taken) readout.Forget();
-
-        _pad.Clear();
-        DrawGuide();
-
-        _opened = null;
-        _take = new Take(_gesture!, session.Api, session.MaxPressure, _pad.ForPen())
-        {
-            Conventions = session.Conventions.ToString() ?? "",
-        };
-        _take.KeepAll(_aloft);
-        _aloft.Clear();
-        var arriving = Approaching(landing);
-        _take.Begin().Approaching(arriving.Readings, arriving.SinceLastSeen, arriving.Last);
-
-        _capture = Capture.Drawing;
-        _haveLast = false;
+        if (what.Restage) Stage();
     }
 
     /// <summary>
@@ -1143,94 +887,63 @@ public partial class MainWindow : Window
     private static (long, long, long)? Counts(IPenSession? session) =>
         session is IPacketCounts c ? (c.PacketsFromDriver, c.PacketsOutsideCaptureRegion, c.PointsDelivered) : null;
 
+    /// <summary>Stops the take, with what the session counted while it ran.</summary>
+    /// <remarks>
+    /// The counters are read here rather than inside the capture because the session belongs
+    /// to this window, and a difference taken across two different sessions is not a
+    /// difference. Same session, and not gone backwards, or nothing is claimed.
+    /// </remarks>
     private void StopTake()
     {
-        if (_take is null || _capture is not (Capture.Armed or Capture.Drawing or Capture.Between)) return;
-
-        // Only when the same session answered both times, and only when every counter has
-        // gone forwards. A count that went backwards is a session that restarted underneath
-        // the take, and the difference across that is not a smaller number -- it is not a
-        // number at all. Reported as absent, which is honest, rather than as an impossibility
-        // somebody has to notice for themselves.
-        _take.Counted =
+        var counted =
             ReferenceEquals(_session, _countedFrom)
             && Counts(_session) is { } now
-            && _armedAt is { } then
+            && _capturing.ArmedAt is { } then
             && now.Item1 >= then.Item1 && now.Item2 >= then.Item2 && now.Item3 >= then.Item3
                 ? (now.Item1 - then.Item1, now.Item2 - then.Item2, now.Item3 - then.Item3)
-                : null;
+                : ((long, long, long)?)null;
 
-        if (_capture == Capture.Drawing && _take.Current is { } drawing)
-        {
-            drawing.EndedBy = "the recording was stopped mid-stroke";
-        }
-
-        _take.StoppedAt = DateTimeOffset.Now;
-
-        _take.EndedBy = _take.Strokes == 0
-            ? "the recording was stopped before anything was drawn"
-            : "the recording was stopped";
-
-        _capture = Capture.Taken;
-        _haveLast = false;
-
-        Stage();
+        Apply(_capturing.Stop(counted));
     }
 
-    /// <summary>
-    /// Arms the recorder, and on a many-stroke gesture starts the take then and there.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// For the six single-stroke gestures the take still begins at the first contact, which
-    /// is what they mean: one attempt at one stroke, and nothing before it is part of it.
-    /// </para>
-    /// <para>
-    /// A many-stroke take is different and was wrong. The recording is a <b>period</b>, not a
-    /// stroke, and a period somebody starts by pressing a button. Beginning at the first
-    /// contact meant the clock could not run until the pen touched down, there was nothing to
-    /// count readings against before then, and the pen in the air on the way to the first
-    /// stroke belonged to no take. Asked for from the pad: press Arm, and the recording is
-    /// running from that moment whether or not anything is being drawn.
-    /// </para>
-    /// </remarks>
+    /// <summary>Arms, and puts the window into the state that shows it.</summary>
     private void ArmTake()
     {
-        _take = null;
-        _capture = Capture.Armed;
-        _haveLast = false;
+        _opened = null;
 
-        if (_gesture is { ManyStrokes: true } && _session is { IsRunning: true } armed)
+        _capturing.KeepAirborne = Keeping;
+
+        if (_gesture is { } gesture && _session is { IsRunning: true } armed)
         {
-            // The transform is frozen here rather than at the first contact. Take says why it
-            // cannot be taken at save time; arming happens on this step with the pad on screen
-            // and the window settled, which satisfies the same requirement and gives the whole
-            // series one transform instead of the first stroke's.
-            _opened = null;
-            _take = new Take(_gesture, armed.Api, armed.MaxPressure, _pad.ForPen())
-            {
-                Conventions = armed.Conventions.ToString() ?? "",
-            };
+            _capturing.Choose(gesture, Speaking(armed));
 
-            _take.KeepAll(_aloft);
-
-            _armedAt = Counts(armed);
             _countedFrom = armed;
         }
 
-        // Whatever the pen did before somebody pressed Arm is not the approach to the stroke
-        // they are about to draw.
-        _hover.Clear();
-        _aloft.Clear();
+        Apply(_capturing.Arm(Counts(_session)));
+    }
 
-        foreach (var readout in Taken) readout.Forget();
+    /// <summary>What a session says about itself, in the capture's terms.</summary>
+    private static Capturing.Device Speaking(IPenSession session) =>
+        new(session.Api, session.MaxPressure, session.Conventions.ToString() ?? "");
 
-        _takeGauges.Forget();
+    /// <summary>Does whatever the capture asked the window for.</summary>
+    private void Apply(Captured what)
+    {
+        if (what.Forget)
+        {
+            foreach (var readout in Taken) readout.Forget();
 
-        _pad.Clear();
-        DrawGuide();
+            _takeGauges.Forget();
+        }
 
-        Stage();
+        if (what.Wipe)
+        {
+            _pad.Clear();
+            DrawGuide();
+        }
+
+        if (what.Restage) Stage();
     }
 
     /// <summary>
@@ -1253,23 +966,12 @@ public partial class MainWindow : Window
         GoTo(step);
     }
 
+    /// <summary>Throws the take away and leaves the window showing nothing.</summary>
     private void Discard()
     {
         _opened = null;
-        _take = null;
-        _capture = Capture.Idle;
 
-        _hover.Clear();
-        _aloft.Clear();
-
-        foreach (var readout in Taken) readout.Forget();
-
-        _takeGauges.Forget();
-
-        _pad.Clear();
-        DrawGuide();
-
-        Stage();
+        Apply(_capturing.Discard());
     }
 
     /// <summary>
@@ -1979,8 +1681,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        _take = take;
-        _capture = Capture.Taken;
+        _capturing.Opened(take);
         _gesture = take.Gesture;
 
         var name = Path.GetFileNameWithoutExtension(path);
