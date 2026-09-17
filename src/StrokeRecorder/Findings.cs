@@ -42,6 +42,7 @@ public static class Findings
         var found = new List<Finding>();
 
         Delivered(found, take);
+        Stillness(found, take);
         Status(found, take);
 
         Series(found, take);
@@ -58,6 +59,78 @@ public static class Findings
         Named(found, take);
 
         return found;
+    }
+
+    /// <summary>
+    /// How fast the pen was travelling across each gap in reporting, which is the claim.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Measured as a <b>speed</b> and not a distance, which is the second version of this
+    /// check. The first asked whether the pen moved less than a pixel across a gap, on the
+    /// strength of eighteen of twenty-one gaps that did -- a threshold chosen after seeing the
+    /// data it described. The next take recorded broke it: six of eleven gaps moved 1.9 to 3.7
+    /// px, all of them short, and a fixed distance is the wrong test for a quantity that scales
+    /// with duration.
+    /// </para>
+    /// <para>
+    /// As a speed it holds. Across every gap over 100 ms recorded so far the pen travels at a
+    /// median of 1 px per second and never above 18, against a median of 261 while the device
+    /// is reporting -- between twenty and a thousand times slower. Thirty px per second is the
+    /// line drawn here, above the worst seen and far below anything the hand does while moving.
+    /// </para>
+    /// <para>
+    /// It is a <b>necessary</b> condition and not a sufficient one: the pen is often equally
+    /// still while reporting continues, so this can fail the claim and cannot confirm it.
+    /// </para>
+    /// </remarks>
+    private static void Stillness(List<Finding> found, Take take)
+    {
+        const double Crawling = 30;
+
+        var gaps = new List<(double Ms, double Moved, double Speed)>();
+
+        foreach (var contact in take.Contacts)
+        {
+            if (contact.SinceLastSeen is not { } since || contact.LastAirborne is not { } last) continue;
+            if (contact.Count == 0) continue;
+
+            var landing = contact.Readings[0];
+            var moved = Math.Sqrt(Math.Pow(landing.X - last.X, 2) + Math.Pow(landing.Y - last.Y, 2));
+
+            gaps.Add((since / 1000.0, moved, moved / (since / 1_000_000.0)));
+        }
+
+        // Under 100 ms is one or two polls: the pen has had no time to be still or to move,
+        // and a speed computed over it is mostly noise.
+        var real = gaps.Where(gap => gap.Ms > 100).ToList();
+
+        if (real.Count == 0)
+        {
+            if (gaps.Count > 0)
+            {
+                found.Add(new(Tone.Plain, "No gap here lasted longer than 100 ms",
+                    $"{gaps.Count} gap{(gaps.Count == 1 ? "" : "s")}, the longest {gaps.Max(g => g.Ms):F0} ms. "
+                    + "Too short to say anything about how fast the pen was moving."));
+            }
+
+            return;
+        }
+
+        var fast = real.Where(gap => gap.Speed >= Crawling).ToList();
+
+        found.Add(new(fast.Count == 0 ? Tone.Good : Tone.Warn,
+            fast.Count == 0
+                ? $"The pen was crawling across all {real.Count} gap{(real.Count == 1 ? "" : "s")}"
+                : $"{fast.Count} of {real.Count} gaps had the pen still moving",
+            $"Gaps over 100 ms: {real.Min(g => g.Ms):F0} to {real.Max(g => g.Ms):F0} ms, the pen "
+            + $"travelling {real.Min(g => g.Speed):F1} to {real.Max(g => g.Speed):F1} px per second "
+            + $"across them. "
+            + (fast.Count == 0
+                ? $"Everything recorded so far stays under {Crawling:F0}, against a median of 261 "
+                  + "while the device is reporting."
+                : $"Above {Crawling:F0} px per second is faster than any gap measured so far, and "
+                  + "is the observation worth keeping rather than repeating.")));
     }
 
     /// <summary>
@@ -115,7 +188,21 @@ public static class Findings
     /// </remarks>
     private static void Delivered(List<Finding> found, Take take)
     {
-        if (take.Counted is not { } c) return;
+        if (take.Counted is not { } c)
+        {
+            // Absent rather than zero. The session could not be asked, or was replaced while
+            // the take was open, and saying nothing is better than reporting a subtraction
+            // across two different counters.
+            if (take.Routed > 0)
+            {
+                found.Add(new(Tone.Plain, "The session could not say what it was given",
+                    $"This window saw {take.Routed} readings and kept all of them. The counts "
+                    + "beneath it are unavailable for this take, so nothing here can speak for "
+                    + "the layer below."));
+            }
+
+            return;
+        }
 
         var lost = c.FromDriver - c.Delivered;
 
@@ -130,6 +217,18 @@ public static class Findings
                   + (lost == c.OutsideRegion
                       ? ". That accounts for all of them."
                       : $", which leaves {lost - c.OutsideRegion} unaccounted for.")));
+
+        var stored = take.Count + take.Aloft.Count + take.DroppedOffPad + take.AfterTheStop;
+
+        if (stored != take.Routed)
+        {
+            found.Add(new(Tone.Warn,
+                $"{take.Routed - stored} readings reached this window and are in none of its columns",
+                $"{take.Routed} were handed over; {take.Count} are in strokes, {take.Aloft.Count} "
+                + $"in the airborne record, {take.DroppedOffPad} were off the pad and "
+                + $"{take.AfterTheStop} arrived after the stop. The rest are unaccounted for, "
+                + "which is a fault in the recorder rather than anything about the pen."));
+        }
 
         if (take.Routed != c.Delivered)
         {

@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.IO;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -152,6 +154,22 @@ public partial class MainWindow : Window
 
     /// <summary>The session's own counts when the take was armed, to subtract from later.</summary>
     private (long, long, long)? _armedAt;
+
+    /// <summary>
+    /// Which session those counts came from, so the subtraction can refuse to span two.
+    /// </summary>
+    /// <remarks>
+    /// The counts are cumulative on the session object. If that object is replaced while a
+    /// take is open -- a reopened Wintab context, a backend change -- the new one starts at
+    /// zero and subtracting the old arming figures from it produces a number that is not
+    /// wrong in a detectable direction: it is simply meaningless. Twice it came out saying
+    /// the recorder had seen more readings than the session handed it, which is impossible,
+    /// and both times the take was one of hovering with no strokes in it.
+    /// </remarks>
+    private IPenSession? _countedFrom;
+
+    /// <summary>When the space bar was last acted on, to tell a held key from two presses.</summary>
+    private long _lastSpace;
 
     /// <summary>
     /// How much of the pen in the air to keep either side of a stroke, in microseconds.
@@ -325,13 +343,38 @@ public partial class MainWindow : Window
         this.FindControl<Button>("Back")!.Click += (_, _) => GoTo(_step - 1);
         this.FindControl<Button>("Next")!.Click += (_, _) => GoTo(_step + 1);
 
+        // The build, in the title bar. Codex's review pointed out that the running recorder
+        // reported a commit older than the fix being discussed, and neither of us could say
+        // whether that was a stale process or a stamp that lags the source. Both are cheap to
+        // rule out once the window says what it is.
+        Title = $"Record a stroke — Stroke Field Guide — {BuildStamp()}";
+
         GoTo(1);
 
         // Tunnelled, so the canvas cannot take the space bar first.
         AddHandler(KeyDownEvent, Pressed, RoutingStrategies.Tunnel);
 
+        // And the key *up*, which is the whole bug. A focused Button in Avalonia has
+        // ClickMode.Release, so it calls OnClick on KeyUp -- and handling KeyDown does not
+        // suppress the separate KeyUp event. So space went: down, this window stops the take,
+        // Stage turns that same button back into Arm, up, the button activates, ArmTake runs.
+        // Stop and immediately restart, and only when a button happened to hold focus, which
+        // is exactly how it was reported: flaky.
+        //
+        // Three fixes were attempted against the key-down path -- a repeat debounce, a
+        // dedicated stop key, then refusing to arm from space at all -- and none of them could
+        // have worked, because the restart was never coming from the key-down path.
+        AddHandler(KeyUpEvent, Released, RoutingStrategies.Tunnel);
+
         _poll = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(PollMilliseconds) };
-        _poll.Tick += (_, _) => Drain();
+        _poll.Tick += (_, _) =>
+        {
+            Drain();
+
+            // Whether or not that brought any readings. A wall clock that only moved when the
+            // pen reported would be the same misleading thing wearing a different number.
+            if (_step == 3 && _take is { Gesture.ManyStrokes: true }) Tick();
+        };
 
         Chose();
 
@@ -484,12 +527,14 @@ public partial class MainWindow : Window
                 "Recording. Nothing has been drawn yet; the clock is running anyway.",
             3 when _capture == Capture.Armed => "Armed. Put the tip down and the take starts.",
             3 when _capture == Capture.Idle && _gesture is { ManyStrokes: true } =>
-                "Press Arm to start recording. The clock runs from then, not from the first stroke.",
+                "Press Arm, or the space bar, to start recording. The clock runs from then.",
             3 when _take is null => $"{_gesture?.Label}. Arm, then draw.",
             3 when _capture is Capture.Drawing or Capture.Between
                 && _take?.Gesture.ManyStrokes == true =>
-                $"{SoFar(_take)} so far. Stop ends the take; the space bar does the same.",
+                $"{SoFar(_take)} so far. Escape stops it, and so does the Stop button.",
             3 when _capture == Capture.Drawing => "Recording. Lift the pen to finish.",
+            3 when _capture == Capture.Taken && _gesture is { ManyStrokes: true } =>
+                $"Stopped. {_take!.Describe()}. Space or Arm records another; Next keeps this one.",
             3 when _capture == Capture.Taken =>
                 $"{_take!.Describe()}. Next reads it back to you.",
             3 => "Armed. Waiting for the tip.",
@@ -705,7 +750,7 @@ public partial class MainWindow : Window
             _take.KeepAll(_aloft);
             _aloft.Clear();
             var opening = Approaching(reading);
-            _take.Begin().Approaching(opening.Readings, opening.SinceLastSeen);
+            _take.Begin().Approaching(opening.Readings, opening.SinceLastSeen, opening.Last);
 
             _capture = Capture.Drawing;
             _haveLast = false;
@@ -741,7 +786,7 @@ public partial class MainWindow : Window
             var next = _take!.Begin();
 
             var coming = Approaching(reading);
-            next.Approaching(coming.Readings, coming.SinceLastSeen);
+            next.Approaching(coming.Readings, coming.SinceLastSeen, coming.Last);
             next.Add(reading);
 
             Lay(_pad, point, session.MaxPressure, _take.Placed);
@@ -758,6 +803,29 @@ public partial class MainWindow : Window
             // The previous take is held right up to this moment rather than thrown away when
             // the last one finished, so a take is only lost by starting another -- and a
             // reader who wants to keep it presses Next before putting the pen down.
+            //
+            // Never on a many-stroke gesture, and this is the whole of the "it stops and
+            // restarts" fault. Stopping one of those with the tip still down leaves the state
+            // Taken while the pen is still in contact, so the very next reading four
+            // milliseconds later arrived here and began a fresh recording. The stop worked
+            // perfectly every time; a new take replaced it before anybody could see.
+            //
+            // A many-stroke take is armed deliberately, and stopped deliberately. Drawing
+            // after it has been stopped is somebody finishing their stroke, not asking for
+            // another recording.
+            if (_gesture is { ManyStrokes: true })
+            {
+                // Counted, not merely discarded. These readings were handed to this window and
+                // are deliberately not kept, and a take whose received count exceeds what it
+                // stored looks exactly like data going missing -- which is the question this
+                // recorder exists to answer honestly.
+                _take!.OneAfterTheStop();
+
+                Stage();
+
+                return;
+            }
+
             Restart(session, reading);
 
             _take!.Add(reading);
@@ -836,7 +904,7 @@ public partial class MainWindow : Window
     /// several milliseconds later, and the window a reader cares about ends where the stroke
     /// begins.
     /// </remarks>
-    private (IReadOnlyList<Reading> Readings, long? SinceLastSeen) Approaching(Reading landing)
+    private (IReadOnlyList<Reading> Readings, long? SinceLastSeen, Reading? Last) Approaching(Reading landing)
     {
         var approach = _hover.Where(seen => landing.At - seen.At <= HoverKept).ToList();
 
@@ -858,9 +926,11 @@ public partial class MainWindow : Window
 
         // Cleared, so the next stroke in the take cannot be handed this one's approach. A
         // stroke that lands with nothing in front of it should say so.
+        var last = _hover.Count > 0 ? _hover[^1] : (Reading?)null;
+
         _hover.Clear();
 
-        return (approach, since);
+        return (approach, since, last);
     }
 
     /// <summary>Begins a take where one has just finished, on the same gesture.</summary>
@@ -878,7 +948,7 @@ public partial class MainWindow : Window
         _take.KeepAll(_aloft);
         _aloft.Clear();
         var arriving = Approaching(landing);
-        _take.Begin().Approaching(arriving.Readings, arriving.SinceLastSeen);
+        _take.Begin().Approaching(arriving.Readings, arriving.SinceLastSeen, arriving.Last);
 
         _capture = Capture.Drawing;
         _haveLast = false;
@@ -904,14 +974,25 @@ public partial class MainWindow : Window
     {
         if (_take is null || _capture is not (Capture.Armed or Capture.Drawing or Capture.Between)) return;
 
-        _take.Counted = Counts(_session) is { } now && _armedAt is { } then
-            ? (now.Item1 - then.Item1, now.Item2 - then.Item2, now.Item3 - then.Item3)
-            : null;
+        // Only when the same session answered both times, and only when every counter has
+        // gone forwards. A count that went backwards is a session that restarted underneath
+        // the take, and the difference across that is not a smaller number -- it is not a
+        // number at all. Reported as absent, which is honest, rather than as an impossibility
+        // somebody has to notice for themselves.
+        _take.Counted =
+            ReferenceEquals(_session, _countedFrom)
+            && Counts(_session) is { } now
+            && _armedAt is { } then
+            && now.Item1 >= then.Item1 && now.Item2 >= then.Item2 && now.Item3 >= then.Item3
+                ? (now.Item1 - then.Item1, now.Item2 - then.Item2, now.Item3 - then.Item3)
+                : null;
 
         if (_capture == Capture.Drawing && _take.Current is { } drawing)
         {
             drawing.EndedBy = "the recording was stopped mid-stroke";
         }
+
+        _take.StoppedAt = DateTimeOffset.Now;
 
         _take.EndedBy = _take.Strokes == 0
             ? "the recording was stopped before anything was drawn"
@@ -960,6 +1041,7 @@ public partial class MainWindow : Window
             _take.KeepAll(_aloft);
 
             _armedAt = Counts(armed);
+            _countedFrom = armed;
         }
 
         // Whatever the pen did before somebody pressed Arm is not the approach to the stroke
@@ -1039,15 +1121,26 @@ public partial class MainWindow : Window
         // somebody their recording had stopped when it had not. Reported by the person it
         // told, who also asked whether the frozen clock and the missing hover data were the
         // same fault. They are not: this one is the display reading the wrong number.
+        // A many-stroke take shows the wall clock: it is either recording or it is not, and
+        // the timer is what somebody reads to know which. Every other gesture shows the pen's
+        // own clock, because there the number is the length of one stroke and the page asks
+        // for it in seconds.
         var seconds = _capture is Capture.Armed or Capture.Drawing or Capture.Between or Capture.Taken
             && _take is not null
-            ? _take.Running / 1000
+            ? (_take.Gesture.ManyStrokes ? _take.Recording : _take.Running) / 1000
             : 0;
 
         this.FindControl<TextBlock>("Clock")!.Text = $"{seconds:F2} s";
 
         this.FindControl<TextBlock>("Wanted")!.Text = _gesture is null
             ? ""
+            : _gesture.ManyStrokes
+                ? _capture switch
+                {
+                    Capture.Armed or Capture.Drawing or Capture.Between => "recording",
+                    Capture.Taken => "stopped",
+                    _ => "not recording",
+                }
             : Asks(_gesture) is { } pace
                 ? $"{_gesture.Label} asks for {pace}"
                 : $"{_gesture.Label} asks for no particular pace";
@@ -1110,7 +1203,8 @@ public partial class MainWindow : Window
             ? "Press Arm to start. From that moment the recording is running -- the clock, the "
               + "pen in the air, and every stroke you draw -- and it keeps going across pen "
               + "lifts, so the whole series lands in one file with the gaps intact. Press "
-              + "Stop, or the space bar, when the series is finished."
+              + "Stop, Escape or the space bar when the series is finished. None of those can "
+              + "start one, so it is the only key you need; Escape only ever stops."
             : "The recording starts when the tip touches down and ends when it lifts, so "
               + "there is nothing to press at either end. The guide on the pad is there to "
               + "follow and is not part of what is recorded.";
@@ -1577,25 +1671,168 @@ public partial class MainWindow : Window
     /// wiped a drawing because somebody corrected a tablet's name would deserve what it got.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// What this binary was built from, as far as it can tell.
+    /// </summary>
+    /// <remarks>
+    /// The informational version carries the commit when the build was deterministic and the
+    /// source was committed at build time. It lags when neither is true -- building with
+    /// uncommitted changes stamps the previous commit -- so it is shown with the file's own
+    /// timestamp beside it, which does not lag.
+    /// </remarks>
+    private static string BuildStamp()
+    {
+        var assembly = Assembly.GetEntryAssembly();
+
+        var version = assembly?
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion ?? "unknown";
+
+        var commit = version.Contains('+') ? version[(version.IndexOf('+') + 1)..] : version;
+
+        if (commit.Length > 7) commit = commit[..7];
+
+        var built = assembly?.Location is { Length: > 0 } path && File.Exists(path)
+            ? File.GetLastWriteTime(path).ToString("HH:mm:ss")
+            : "?";
+
+        return $"{commit}, built {built}";
+    }
+
+    /// <summary>
+    /// Writes down every key this window is offered, before anything decides to ignore it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Escape was reported as doing nothing, and silence has two explanations that look
+    /// identical from outside: the handler never ran, or it ran and every guard inside it
+    /// declined. Guessing between them is what produced three fixes that could not work.
+    /// </para>
+    /// <para>
+    /// So this records the key and the state that decides its fate, at the top of the handler
+    /// and before the first guard. To a file rather than the window, because a diagnostic that
+    /// changes focus would change the thing being diagnosed.
+    /// </para>
+    /// </remarks>
+    private void Logged(KeyEventArgs e)
+    {
+        if (e.Key is not (Key.Space or Key.Escape)) return;
+
+        try
+        {
+            var where = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                "StrokeFieldGuide", "keys.log");
+
+            Directory.CreateDirectory(Path.GetDirectoryName(where)!);
+
+            File.AppendAllText(where,
+                $"{DateTime.Now:HH:mm:ss.fff} {e.Key,-6} {e.RoutedEvent?.Name,-8} "
+                + $"handled={e.Handled,-5} focus={FocusManager?.GetFocusedElement()?.GetType().Name ?? "none",-12} "
+                + $"active={IsActive,-5} step={_step} capture={_capture} "
+                + $"many={_gesture?.ManyStrokes} take={(_take is null ? "none" : _take.Strokes + " strokes")}"
+                + Environment.NewLine);
+        }
+        catch
+        {
+            // A diagnostic that throws is worse than one that is missing.
+        }
+    }
+
+    /// <summary>
+    /// Swallows the release of any key this window acted on, so nothing else acts on it too.
+    /// </summary>
+    /// <remarks>
+    /// Consuming the down without the up is owning half a gesture, and the half left behind
+    /// goes to whatever holds focus. A button is the likely holder here because pressing one
+    /// is how somebody armed the take in the first place.
+    /// </remarks>
+    private void Released(object? sender, KeyEventArgs e)
+    {
+        Logged(e);
+
+        if (FocusManager?.GetFocusedElement() is TextBox) return;
+
+        if (_step == 3 && e.Key is Key.Space or Key.Escape) e.Handled = true;
+    }
+
     private void Pressed(object? sender, KeyEventArgs e)
     {
+        Logged(e);
+
         if (FocusManager?.GetFocusedElement() is TextBox) return;
 
         // Space arms and disarms, so a reader recording one stroke after another never has to
         // put the pen down and find a button. It is taken before the canvas sees it, because
         // a canvas holds the space bar for hand-panning and would mark it handled.
+        // Escape stops and does nothing else, ever. Space toggles, and a toggle is the wrong
+        // shape for a key somebody presses while holding a pen they must not move: the key
+        // repeats, the second press falls through to the arming branch, and the take that was
+        // just stopped starts again. Reported from the pad as "sometimes it stops and rearms".
+        if (e.Key == Key.Escape && _step == 3
+            && _capture is Capture.Armed or Capture.Drawing or Capture.Between
+            && _take?.Gesture.ManyStrokes == true)
+        {
+            StopTake();
+
+            e.Handled = true;
+
+            return;
+        }
+
         if (e.Key == Key.Space && _step == 3)
         {
-            // On a many-stroke take the same key stops it. The pen is in the hand and the
-            // take may have been running for a minute; reaching for a button with the other
-            // hand is the one moment this window would make somebody look away from the pad.
-            if (_capture is Capture.Armed or Capture.Drawing or Capture.Between
-                && _take?.Gesture.ManyStrokes == true)
+            // No debounce where the key can only stop. Stopping a stopped take does nothing,
+            // so a repeat is harmless -- and a time guard could swallow a real stop that
+            // happened to follow a previous press closely, which is worse than the thing it
+            // was guarding against. It remains below, on the branch that can still arm.
+
+            // On a many-stroke gesture the space bar can only ever stop. It cannot arm, and
+            // it cannot restart what it just stopped.
+            //
+            // Debouncing the auto-repeat was not enough, and the reason is that a toggle is
+            // the wrong thing here however carefully it is guarded: any second press starts a
+            // recording, and somebody who is not certain the first one registered will press
+            // again. Reported twice from the pad, the second time on a build that had already
+            // been "fixed".
+            //
+            // Nothing is lost by refusing. A many-stroke take is armed deliberately, before
+            // the pen is in position, and the button is the right place for that.
+            // Space is the toggle it always was: it starts a recording when none is running
+            // and stops the one that is.
+            //
+            // It was made stop-only for a while, to keep it from restarting a take it had just
+            // stopped. That removed the only way to start a recording without reaching for the
+            // screen, which is the thing this key exists to avoid -- and the restart was never
+            // its fault. Two other mechanisms were doing it: the key-up activating whichever
+            // button held focus, and the pen, still in contact, reaching the branch that starts
+            // a new take when somebody draws after finishing one. Both are fixed, so the toggle
+            // is safe again.
+            //
+            // Escape stays stop-only, for when stopping is the only thing wanted.
+            if (_gesture is { ManyStrokes: true })
             {
-                StopTake();
+                if (_capture is Capture.Armed or Capture.Drawing or Capture.Between) StopTake();
+                else ArmTake();
             }
-            else if (_capture is Capture.Armed) Discard();
-            else ArmTake();
+            else
+            {
+                // The toggle, for the six single-stroke gestures. Here a repeat can still
+                // start something, so the time guard earns its place.
+                var now = Environment.TickCount64;
+
+                if (now - _lastSpace < 400)
+                {
+                    e.Handled = true;
+
+                    return;
+                }
+
+                _lastSpace = now;
+
+                if (_capture is Capture.Armed) Discard();
+                else ArmTake();
+            }
 
             e.Handled = true;
 

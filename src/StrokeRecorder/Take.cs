@@ -119,12 +119,25 @@ public sealed class Contact
     /// </remarks>
     public long? SinceLastSeen { get; private set; }
 
-    public void Approaching(IEnumerable<Reading> readings, long? sinceLastSeen)
+    /// <summary>
+    /// The last reading of the pen in the air before this stroke, however old.
+    /// </summary>
+    /// <remarks>
+    /// Kept separately from <see cref="Approach"/>, which holds only what fell inside the
+    /// window and is empty for every gap longer than it. This is the one the measurement
+    /// needs: how far the pen travelled between the last time it was seen and the moment it
+    /// landed. Across every gap recorded so far that distance is under a pixel, and the claim
+    /// this repository now makes is that it always will be.
+    /// </remarks>
+    public Reading? LastAirborne { get; private set; }
+
+    public void Approaching(IEnumerable<Reading> readings, long? sinceLastSeen, Reading? lastAirborne)
     {
         _approach.Clear();
         _approach.AddRange(readings);
 
         SinceLastSeen = sinceLastSeen;
+        LastAirborne = lastAirborne;
     }
 
     public void Departing(Reading reading) => _departure.Add(reading);
@@ -294,6 +307,20 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
 
     public void DroppedOne() => DroppedOffPad++;
 
+    /// <summary>
+    /// Readings that arrived with the tip still down after the recording had been stopped.
+    /// </summary>
+    /// <remarks>
+    /// Not a fault and not a loss: the recording was over, and somebody finishing the stroke
+    /// they were in the middle of is not asking for it to be kept. But they were handed to
+    /// this window, so they have to be accounted for somewhere, or the take reports more
+    /// readings received than stored and the difference looks like data going missing. It did
+    /// exactly that on the first take recorded after the stop behaviour changed.
+    /// </remarks>
+    public int AfterTheStop { get; private set; }
+
+    public void OneAfterTheStop() => AfterTheStop++;
+
     /// <summary>Every reading the recorder was handed while this take was open.</summary>
     public int Routed { get; private set; }
 
@@ -342,6 +369,27 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
     /// started and is therefore what a clock should agree with.
     /// </remarks>
     public double Running => FirstSeen is { } from ? (LastSeen - from) / 1000.0 : 0;
+
+    /// <summary>When the recording was stopped, or null while it is still going.</summary>
+    public DateTimeOffset? StoppedAt { get; set; }
+
+    /// <summary>
+    /// How long this take has been recording, on the wall clock, from arming to stopping.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Deliberately <b>not</b> the pen's clock. <see cref="Running"/> advances only when
+    /// readings arrive, so it stalls whenever the pen is held still -- and a stalled clock is
+    /// read by anybody looking at it as "the recording has stopped". It had not. Reported from
+    /// the pad, and the confusion is entirely the display's fault: a timer is the one thing on
+    /// this screen people take as the answer to "is it on?".
+    /// </para>
+    /// <para>
+    /// The pen's clock remains the right measure of a stroke and of a take's contents, and is
+    /// what the file carries. This is for the person watching.
+    /// </para>
+    /// </remarks>
+    public double Recording => ((StoppedAt ?? DateTimeOffset.Now) - At).TotalMilliseconds;
 
     /// <summary>Whether anything at all was recorded: a stroke, or the pen in the air.</summary>
     /// <remarks>

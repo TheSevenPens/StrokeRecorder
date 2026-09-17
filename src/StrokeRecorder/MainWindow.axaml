@@ -352,33 +352,13 @@
                        Text="A light-pressure wobble is invisible at 10 and obvious at 300." />
           </StackPanel>
 
-          <Border Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
-                  CornerRadius="4" Padding="12,8">
-            <StackPanel Spacing="2">
-              <TextBlock Name="Clock" Text="0.00 s" FontSize="30" FontWeight="SemiBold"
-                         FontFamily="Consolas,Menlo,monospace" />
-              <TextBlock Name="Wanted" Classes="label" Text="" />
-            </StackPanel>
-          </Border>
-
-          <CheckBox Name="TakeRound" Content="Round nib, ignoring the lean" />
-
-          <StackPanel Spacing="4">
-            <TextBlock Text="Nib size" Classes="label" />
-            <ComboBox Name="TakeSize" HorizontalAlignment="Stretch" />
-            <!-- Large is the point of this: a wobble of a tenth of the range is a fraction of
-                 a pixel on a small nib and plainly visible on a wide one. -->
-            <TextBlock Classes="lede" FontSize="11" Margin="0,2,0,0"
-                       Text="A light-pressure wobble is invisible at 10 and obvious at 300." />
-          </StackPanel>
-
           <StackPanel Orientation="Horizontal" Spacing="8">
             <Button Name="Arm" Content="Arm" />
             <Button Name="Again" Content="Throw it away" IsEnabled="False" />
           </StackPanel>
 
           <TextBlock Classes="lede" FontSize="11"
-                     Text="Space arms and disarms. Finishing a stroke arms the next one, and the take you have is kept until you actually start another." />
+                     Text="Space starts a recording and stops it again, so it is the only key you need. Escape only ever stops, for when that is all you want." />
 
           <Border Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
                   CornerRadius="4" Padding="12">
