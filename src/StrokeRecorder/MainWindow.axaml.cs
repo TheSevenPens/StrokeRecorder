@@ -391,24 +391,13 @@ public partial class MainWindow : Window
             this.FindControl<StackPanel>("Readouts")!.Children.Add(readout.AsRow().Visual);
         }
 
-        var backends = this.FindControl<ComboBox>("Backends")!;
-        var available = PenBackends.Available();
+        // Discovery itself happens when the window is up, not here. See Discover.
+        this.FindControl<ComboBox>("Backends")!.SelectionChanged += (_, _) =>
+        {
+            if (!_discovering) Chose();
+        };
 
-        // Every backend is listed, and the ones this machine cannot open are listed as
-        // unavailable rather than left out. A backend that is absent because no driver is
-        // installed and one that was never offered look the same in a shorter list.
-        backends.ItemsSource = PenBackends.All
-            .Select(backend => new BackendChoice(backend, available.Contains(backend.Api)))
-            .ToList();
-
-        backends.SelectedIndex = PenBackends.All
-            .Select((backend, index) => (backend, index))
-            .Where(pair => available.Contains(pair.backend.Api))
-            .Select(pair => pair.index)
-            .DefaultIfEmpty(0)
-            .First();
-
-        backends.SelectionChanged += (_, _) => Chose();
+        this.FindControl<Button>("Recheck")!.Click += (_, _) => Discover();
 
         this.FindControl<Button>("Clear")!.Click += (_, _) => Wipe();
 
@@ -529,7 +518,7 @@ public partial class MainWindow : Window
         // Not from the constructor. A WM_POINTER session subclasses the window handle and a
         // Wintab one wants a window in the foreground, and at this point there is no window
         // -- TryGetPlatformHandle answers null and the session starts against nothing.
-        Opened += (_, _) => { _shown = true; Open(); };
+        Opened += (_, _) => { _shown = true; Discover(); Open(); };
 
         Closed += (_, _) => Shutdown();
     }
@@ -2420,6 +2409,65 @@ public partial class MainWindow : Window
     /// time drifts into.
     /// </para>
     /// </remarks>
+
+    /// <summary>Whether the backend list is being rebuilt, so its selection is not a choice.</summary>
+    private bool _discovering;
+
+    /// <summary>
+    /// Asks which backends can be opened on this machine, and says so in the list.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Asked when the window is up, and never cached.</b> It used to run in the
+    /// constructor, before there was a window. That is the wrong moment for this particular
+    /// question: a Wintab context is granted against a window, and the driver's own service
+    /// can be stopped and started while this application is running -- so an answer taken
+    /// before the window existed can say a backend is unavailable when it is sitting there
+    /// working, and an answer taken once can be wrong for the rest of the session.
+    /// </para>
+    /// <para>
+    /// Which is why there is a button. The recovery for the commonest case -- the driver's
+    /// context table filling up, the service being restarted to clear it -- is to ask again,
+    /// and a list fixed at startup makes that restart invisible until the window is closed
+    /// and reopened.
+    /// </para>
+    /// <para>
+    /// Every backend is listed either way, and the ones this machine cannot open are listed
+    /// as unavailable rather than left out. A backend absent because no driver is installed
+    /// and one that was never offered look the same in a shorter list.
+    /// </para>
+    /// </remarks>
+    private void Discover()
+    {
+        var backends = this.FindControl<ComboBox>("Backends")!;
+        var available = PenBackends.Available();
+
+        // What is selected now, so a refresh does not move a reader off the backend they
+        // picked. Rebuilding the list raises SelectionChanged, which is what _discovering is
+        // for: a list being replaced is not somebody choosing.
+        var chosen = (backends.SelectedItem as BackendChoice)?.Backend.Api;
+
+        var choices = PenBackends.All
+            .Select(backend => new BackendChoice(backend, available.Contains(backend.Api)))
+            .ToList();
+
+        _discovering = true;
+
+        try
+        {
+            backends.ItemsSource = choices;
+
+            backends.SelectedIndex = Choosing.Backend(
+                [.. PenBackends.All.Select(backend => backend.Api)], available, chosen);
+        }
+        finally
+        {
+            _discovering = false;
+        }
+
+        Chose();
+    }
+
     private void Shutdown()
     {
         _poll.Stop();

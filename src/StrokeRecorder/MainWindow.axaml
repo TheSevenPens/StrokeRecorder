@@ -169,7 +169,14 @@
       <StackPanel Spacing="8">
         <StackPanel Spacing="4">
           <TextBlock Text="Backend" Classes="label" />
-          <ComboBox Name="Backends" HorizontalAlignment="Stretch" />
+          <!-- Asked again rather than remembered. Which backends can be opened depends on a
+               driver and a service that can start or stop while this window is up, so the
+               answer has a shelf life and the button is how a reader gets a fresh one. -->
+          <DockPanel LastChildFill="True">
+            <Button Name="Recheck" DockPanel.Dock="Right" Content="Recheck" Margin="8,0,0,0"
+                    ToolTip.Tip="Ask again which backends can be opened on this machine." />
+            <ComboBox Name="Backends" HorizontalAlignment="Stretch" />
+          </DockPanel>
           <!-- Shown only when a backend cannot be opened. What one is worth is on its card
                in the list; repeating it here was a paragraph nobody read twice. -->
           <TextBlock Name="BackendWorth" Classes="lede" FontSize="12" Margin="0,4,0,0"
