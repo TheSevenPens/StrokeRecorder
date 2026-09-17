@@ -155,7 +155,8 @@ public static class Reopen
             take.Reopened(
                 (int)Number(root, "readingsHandedToTheRecorder"),
                 (int)Number(root, "readingsDroppedForBeingOffThePad"),
-                (int)Number(root, "readingsAfterTheRecordingStopped"));
+                (int)Number(root, "readingsAfterTheRecordingStopped"),
+                (int)Number(root, "readingsAirborneAndNotKept"));
 
             return take.Holds
                 ? new(take, null)

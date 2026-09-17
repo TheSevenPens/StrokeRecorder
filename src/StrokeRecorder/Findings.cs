@@ -315,20 +315,23 @@ public static class Findings
     /// <remarks>
     /// Answerable from the take alone, so it is answered whatever the session could or could
     /// not say. Every reading handed over has exactly one place it should have ended up: in a
-    /// stroke, in the airborne record, dropped for being off the pad, or arriving after the
-    /// stop. A reading in none of them is one this window lost.
+    /// stroke, in the airborne record, left out because the airborne record was not asked
+    /// for, dropped for being off the pad, or arriving after the stop. A reading in none of
+    /// them is one this window lost.
     /// </remarks>
     private static void Kept(List<Finding> found, Take take)
     {
         if (take.Routed == 0) return;
 
-        var stored = take.Count + take.Aloft.Count + take.DroppedOffPad + take.AfterTheStop;
+        var stored = take.Count + take.Aloft.Count + take.DroppedOffPad + take.AfterTheStop
+                     + take.LeftOut;
 
         if (stored == take.Routed)
         {
             found.Add(new(Tone.Good,
                 $"Every one of {take.Routed} readings this window was handed is accounted for",
                 $"{take.Count} in strokes, {take.Aloft.Count} in the airborne record, "
+                + $"{take.LeftOut} airborne and deliberately not kept, "
                 + $"{take.DroppedOffPad} off the pad, {take.AfterTheStop} after the stop. "
                 + "Counted from this take alone, so it holds whether or not the session below "
                 + "could be asked what it was given."));
@@ -343,9 +346,10 @@ public static class Findings
                 ? $"{missing} readings reached this window and are in none of its columns"
                 : $"{-missing} more readings are stored than were handed over",
             $"{take.Routed} were handed over; {take.Count} are in strokes, {take.Aloft.Count} "
-            + $"in the airborne record, {take.DroppedOffPad} were off the pad and "
-            + $"{take.AfterTheStop} arrived after the stop. That is a fault in the recorder "
-            + "rather than anything about the pen."));
+            + $"in the airborne record, {take.LeftOut} were airborne and deliberately not "
+            + $"kept, {take.DroppedOffPad} were off the pad and {take.AfterTheStop} arrived "
+            + "after the stop. That is a fault in the recorder rather than anything about "
+            + "the pen."));
     }
 
     /// <summary>

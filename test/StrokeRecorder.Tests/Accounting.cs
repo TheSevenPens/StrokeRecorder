@@ -88,6 +88,37 @@ public class Accounting
             "the recorder should say when it cannot speak for the session");
     }
 
+    /// <summary>
+    /// That hover readings left out on purpose are counted, not reported as lost.
+    /// </summary>
+    /// <remarks>
+    /// Found on a real recording made to check something else: 137 readings handed over, 18
+    /// in strokes, 3 off the pad — and 116 reported as reaching the window and landing in no
+    /// column. Every one was a hovering reading, left out because the airborne record was
+    /// switched off, which is a thing the recorder chose to do rather than a thing that went
+    /// wrong. <b>Left out is not lost</b>, and an instrument that cannot tell them apart is
+    /// not much use for the question this one exists to answer.
+    /// </remarks>
+    [Fact]
+    public void Airborne_readings_left_out_on_purpose_are_not_reported_as_missing()
+    {
+        var take = Made(readings: 18, routed: 137);
+
+        for (var each = 0; each < 116; each++) take.OneLeftOut();
+
+        for (var each = 0; each < 3; each++) take.DroppedOne();
+
+        var found = Of(take);
+
+        Assert.False(Says(found, "in none of its columns"),
+            "readings left out on purpose were reported as missing");
+
+        Assert.True(Says(found, "accounted for"));
+
+        Assert.True(Says(found, "deliberately not kept"),
+            "the column should say what it holds");
+    }
+
     [Fact]
     public void More_stored_than_handed_over_is_also_reported()
     {

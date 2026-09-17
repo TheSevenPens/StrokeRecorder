@@ -858,6 +858,13 @@ public partial class MainWindow : Window
             DrawGuide();
         }
 
+        // A stroke that is starting must not be joined to the one before it. Lay draws from
+        // the last point it was given unless this is cleared, and the version of Record this
+        // replaced cleared it at every state transition -- which was lost in the move, so the
+        // first reading of each stroke drew a line from wherever the previous stroke ended.
+        // Reported from the pad as a line from nowhere to the landing.
+        if (what.Began || !what.Drew) _haveLast = false;
+
         if (what.Drew)
         {
             Lay(_pad, point, session.MaxPressure, _take!.Placed);
@@ -1620,6 +1627,7 @@ public partial class MainWindow : Window
         host.Children.Add(Tally("handed over", take.Routed, rule: true));
         host.Children.Add(Tally("in strokes", take.Count));
         host.Children.Add(Tally("in the airborne record", take.Aloft.Count));
+        host.Children.Add(Tally("airborne, not kept", take.LeftOut));
         host.Children.Add(Tally("off the pad", take.DroppedOffPad));
         host.Children.Add(Tally("after the stop", take.AfterTheStop));
 

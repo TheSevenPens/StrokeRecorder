@@ -347,4 +347,79 @@ public class CaptureTests
         Assert.Contains(Disposition.RetainedAirborne, seen);
         Assert.Contains(Disposition.OffPad, seen);
     }
+
+    // ---- what the window needs to draw it --------------------------------
+
+    /// <summary>
+    /// That a reading starting a stroke says so, so its ink is not joined to the last one.
+    /// </summary>
+    /// <remarks>
+    /// Reported from the pad: "when the stroke first landed a line was drawn from some random
+    /// point to the place the pen touched". The random point was the end of the previous
+    /// stroke. The window draws from the last point it laid unless told to forget it, and the
+    /// version of Record this replaced forgot it at every state transition -- which the
+    /// extraction lost. The recorded data was never affected; only the ink on the pad.
+    /// </remarks>
+    [Fact]
+    public void The_first_reading_of_every_stroke_says_it_began_one()
+    {
+        var capturing = Ready();
+
+        capturing.Arm(null);
+
+        Assert.True(capturing.Took(Down(10, Tick), true).Began, "the first landing");
+
+        Assert.False(capturing.Took(Down(11, Tick * 2), true).Began, "the one after it");
+
+        capturing.Took(Above(11, Tick * 3), true);
+
+        Assert.True(capturing.Took(Down(40, Tick * 4), true).Began, "the second stroke");
+    }
+
+    [Fact]
+    public void Coming_back_onto_the_pad_begins_a_stroke_too()
+    {
+        var capturing = Ready();
+
+        capturing.Arm(null);
+        capturing.Took(Down(10, Tick), true);
+        capturing.Took(Down(9000, Tick * 2), false);
+
+        Assert.True(capturing.Took(Down(20, Tick * 3), true).Began);
+    }
+
+    [Fact]
+    public void A_single_stroke_take_drawn_again_begins_a_stroke()
+    {
+        var capturing = Ready(manyStrokes: false);
+
+        capturing.Arm(null);
+        capturing.Took(Down(10, Tick), true);
+        capturing.Took(Above(10, Tick * 2), true);
+
+        var what = capturing.Took(Down(50, Tick * 9), true);
+
+        Assert.True(what.Began);
+    }
+
+    /// <summary>That a restarted take keeps the reading that restarted it.</summary>
+    /// <remarks>
+    /// Found while fixing the one above, by reading the version this replaced: it added the
+    /// landing to the new take and the extraction did not, so the first reading of a redrawn
+    /// single-stroke take was lost.
+    /// </remarks>
+    [Fact]
+    public void A_restarted_take_holds_the_reading_that_restarted_it()
+    {
+        var capturing = Ready(manyStrokes: false);
+
+        capturing.Arm(null);
+        capturing.Took(Down(10, Tick), true);
+        capturing.Took(Above(10, Tick * 2), true);
+
+        capturing.Took(Down(50, Tick * 9), true);
+
+        Assert.Equal(1, capturing.Take!.Count);
+        Assert.Equal(50, capturing.Take.Readings[0].X);
+    }
 }

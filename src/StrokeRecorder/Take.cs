@@ -345,6 +345,27 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
     public void OneAfterTheStop() => AfterTheStop++;
 
     /// <summary>
+    /// Airborne readings deliberately not kept, because the airborne record was not asked for.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A column of its own, because without one these readings were handed over, counted as
+    /// routed, and then appeared in nothing — so a perfectly ordinary recording with the
+    /// airborne record switched off reported that most of its readings had gone missing. On a
+    /// take of 137 readings with 18 in strokes, 116 were reported unaccounted for; every one
+    /// of them was a hovering reading left out on purpose.
+    /// </para>
+    /// <para>
+    /// <b>Left out is not the same as lost</b>, and an instrument that cannot tell them apart
+    /// is not much use for the question this one exists to answer.
+    /// </para>
+    /// </remarks>
+    public int LeftOut { get; private set; }
+
+    /// <summary>One airborne reading, not kept because none are being kept.</summary>
+    public void OneLeftOut() => LeftOut++;
+
+    /// <summary>
     /// Restores the counts a take was written with, for one read back from a file.
     /// </summary>
     /// <remarks>
@@ -354,11 +375,12 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
     /// claiming nothing was ever handed over, which is the one reading of it that is never
     /// true.
     /// </remarks>
-    public void Reopened(int routed, int offPad, int afterTheStop)
+    public void Reopened(int routed, int offPad, int afterTheStop, int leftOut = 0)
     {
         Routed = routed;
         DroppedOffPad = offPad;
         AfterTheStop = afterTheStop;
+        LeftOut = leftOut;
     }
 
     /// <summary>Every reading the recorder was handed while this take was open.</summary>

@@ -38,12 +38,18 @@ public enum Disposition
 /// <summary>What the window should do about a reading, once the capture has decided.</summary>
 /// <param name="Of">The one thing that became of it.</param>
 /// <param name="Drew">Lay this point's ink on the pad.</param>
+/// <param name="Began">
+/// This reading started a stroke, so its ink must not be joined to whatever was drawn before
+/// it. Reported from the pad as a line from nowhere to the landing: the window draws from the
+/// last point it laid unless told to forget it, and the extraction lost the place that did.
+/// </param>
 /// <param name="Restage">The step's presentation has changed and wants rebuilding.</param>
 /// <param name="Wipe">Clear the pad and draw the guide again.</param>
 /// <param name="Forget">Reset the per-take readouts.</param>
 public readonly record struct Captured(
     Disposition Of,
     bool Drew = false,
+    bool Began = false,
     bool Restage = false,
     bool Wipe = false,
     bool Forget = false);
@@ -217,6 +223,12 @@ public sealed class Capturing
 
                 airborne = Disposition.RetainedAirborne;
             }
+            else
+            {
+                // Counted, because it was handed over and it is not in any column. Left out
+                // deliberately is a disposition; it is not the same as missing.
+                Take?.OneLeftOut();
+            }
 
             if (Moved(reading)) Hovering(reading);
         }
@@ -262,6 +274,10 @@ public sealed class Capturing
             Take.Begin().Approaching(opening.Readings, opening.SinceLastSeen, opening.Last);
 
             State = Capture.Drawing;
+
+            Take.Add(reading);
+
+            return new(Disposition.Contact, Drew: true, Began: true);
         }
 
         if (State == Capture.Drawing)
@@ -288,7 +304,7 @@ public sealed class Capturing
 
             State = Capture.Drawing;
 
-            return new(Disposition.Contact, Drew: true);
+            return new(Disposition.Contact, Drew: true, Began: true);
         }
 
         if (State == Capture.Taken && reading.InContact)
@@ -305,11 +321,19 @@ public sealed class Capturing
 
             Restart(reading);
 
-            return new(Disposition.Contact, Drew: true, Wipe: true, Forget: true);
+            // The landing that restarted it belongs to the take it restarted. The version
+            // this replaced added it here; the extraction did not, so the first reading of a
+            // redrawn single-stroke take was lost.
+            Take!.Add(reading);
+
+            return new(Disposition.Contact, Drew: true, Began: true, Wipe: true, Forget: true);
         }
 
-        return new(State == Capture.Idle && !reading.InContact ? airborne
-            : reading.InContact ? Disposition.Unarmed : airborne);
+        // Restage, because the version this replaced called Stage() at the bottom of every
+        // path that was not an off-pad early return -- which is how the step's own summary
+        // stayed current while somebody was drawing. Matched rather than improved on: this
+        // extraction changes no policy, and how often a window redraws is policy.
+        return new(reading.InContact ? Disposition.Unarmed : airborne, Restage: true);
     }
 
     /// <summary>A take of the chosen gesture, through the open device, at today's placement.</summary>

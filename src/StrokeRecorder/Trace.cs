@@ -160,6 +160,7 @@ public static class Trace
         json.WriteNumber("readingsHandedToTheRecorder", take.Routed);
         json.WriteNumber("readingsDroppedForBeingOffThePad", take.DroppedOffPad);
         json.WriteNumber("readingsAfterTheRecordingStopped", take.AfterTheStop);
+        json.WriteNumber("readingsAirborneAndNotKept", take.LeftOut);
 
         // From beneath the session's own filtering, where the backend can say. The difference
         // between what the driver delivered and what the session passed on is the one number
