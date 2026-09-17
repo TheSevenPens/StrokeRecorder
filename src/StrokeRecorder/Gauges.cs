@@ -159,8 +159,12 @@ public sealed class Gauges : Control
         context.DrawLine(Hairline, new Point(centre.X, centre.Y - _radius), new Point(centre.X, centre.Y + _radius));
 
         // Labelled, because the whole of this correction was about which way the dial faces.
-        Write(context, "N", centre.X, centre.Y - _radius - 1, _caption, Label);
-        Write(context, "E", centre.X + _radius + _caption * 0.7, centre.Y - _caption, _caption, Label);
+        // Both centred on a point the same distance beyond the rim, so they sit outside the
+        // dial and outside it equally.
+        var beyond = _radius + _caption * 0.75;
+
+        Write(context, "N", centre.X, centre.Y - beyond, _caption, Label, middle: true);
+        Write(context, "E", centre.X + beyond, centre.Y, _caption, Label, middle: true);
 
         if (_reporting)
         {
@@ -292,12 +296,19 @@ public sealed class Gauges : Control
             centre.X, centre.Y + _radius + 3 + _caption + 3, _value, Ink);
     }
 
+    /// <param name="middle">
+    /// Whether <paramref name="y"/> is the text's vertical centre rather than its top. The
+    /// horizontal position has always been a centre, and the mismatch is what put the compass
+    /// letters at two different distances from the dial: N was anchored a pixel above the rim
+    /// and then hung its whole height back down inside it, while E was pushed clear sideways.
+    /// </param>
     private static void Write(DrawingContext context, string text, double x, double y,
-                              double size, IBrush brush)
+                              double size, IBrush brush, bool middle = false)
     {
         var laid = new FormattedText(text, System.Globalization.CultureInfo.InvariantCulture,
             FlowDirection.LeftToRight, Typeface.Default, size, brush);
 
-        context.DrawText(laid, new Point(x - laid.Width / 2, y));
+        context.DrawText(laid, new Point(x - laid.Width / 2,
+                                         middle ? y - laid.Height / 2 : y));
     }
 }

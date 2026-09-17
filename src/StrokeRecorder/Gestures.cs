@@ -84,8 +84,38 @@ public sealed record Gesture(
 /// </remarks>
 public static class Gestures
 {
+    /// <summary>Every gesture the recorder offers, in the order the list shows them.</summary>
+    /// <remarks>
+    /// <b>Multi-stroke is first because it is the one that asks nothing of the reader.</b> Every
+    /// other entry names a thing to draw, so picking it is a decision about what the session is
+    /// for; this one says draw, and keeps recording until you stop. It is also the closest thing
+    /// to picking a pen up, which is what most sessions turn out to want -- and it is pre-selected
+    /// for the same reason, so the step can be passed through rather than answered.
+    /// <para>
+    /// Freeform follows it on the same reasoning: it is the other entry that prescribes
+    /// nothing, and a reader who does not want a given shape should reach both of the ones
+    /// that do not ask for one before the five that do.
+    /// </para>
+    /// </remarks>
     public static IReadOnlyList<Gesture> All =>
     [
+        new("multi-stroke", "Multi-stroke drawing",
+            "Keeps recording across pen lifts. Draw the whole series, then press Stop. Say "
+            + "what you were varying when you name it.",
+            "What a hand does across a series rather than within one stroke: how a stroke "
+            + "starts, how it ends, and what changes from one to the next when something is "
+            + "being varied on purpose.",
+            "A series of strokes recorded as one take, with the pen lifting between them.",
+            "M10 40 C18 20 26 20 34 40 M40 38 C46 16 52 16 58 38 M64 36 C68 14 72 14 76 36",
+            null,
+            ManyStrokes: true),
+
+        new("freeform", "Freeform",
+            "No guide. Draw whatever the trace is for, and describe it yourself at the end.",
+            "Anything the presets do not cover.",
+            "",
+            "M12 40 C26 8 34 52 46 30 S66 14 78 34",
+            null),
         new("slow-diagonal", "Slow diagonal",
             "Trace the dashed line slowly, three or four seconds end to end. Against a ruler "
             + "if you have one.",
@@ -128,22 +158,5 @@ public static class Gestures
             new Guide.Line(0.1, 0.5, 0.9, 0.5),
             Filled: true),
 
-        new("multi-stroke", "Multi-stroke drawing",
-            "Keeps recording across pen lifts. Draw the whole series, then press Stop. Say "
-            + "what you were varying when you name it.",
-            "What a hand does across a series rather than within one stroke: how a stroke "
-            + "starts, how it ends, and what changes from one to the next when something is "
-            + "being varied on purpose.",
-            "A series of strokes recorded as one take, with the pen lifting between them.",
-            "M10 40 C18 20 26 20 34 40 M40 38 C46 16 52 16 58 38 M64 36 C68 14 72 14 76 36",
-            null,
-            ManyStrokes: true),
-
-        new("freeform", "Freeform",
-            "No guide. Draw whatever the trace is for, and describe it yourself at the end.",
-            "Anything the presets do not cover.",
-            "",
-            "M12 40 C26 8 34 52 46 30 S66 14 78 34",
-            null),
     ];
 }

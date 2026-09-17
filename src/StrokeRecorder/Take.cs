@@ -73,15 +73,18 @@ public sealed class Contact
     /// begins at the moment of contact.
     /// </para>
     /// <para>
-    /// <b>Empty is the ordinary answer on this tablet, and it cannot be fixed here.</b> The
-    /// device stops reporting the hovering pen before a landing -- measured at 264 ms to 3.9
-    /// seconds across five takes -- and resumes within 4 ms of the lift. Counted at the point
-    /// the session receives them, the driver sent 1072 packets and delivered all 1072, so the
-    /// readings are not being discarded anywhere in software. They are never sent.
+    /// <b>It used to come back empty, and that was this recorder's fault.</b> The paragraph
+    /// here said the device stopped reporting the hovering pen before a landing, for 264 ms to
+    /// 3.9 seconds, and that nothing in software could be done about it. Every word of that was
+    /// wrong. The device reports continuously; the window that decided what fell inside the
+    /// quarter second was measuring with the pen's own timestamp, which advances a flat 4.166
+    /// ms per packet whatever the elapsed time and jumps forward at each landing. A reading
+    /// genuinely 20 ms old measured two seconds old and was discarded.
     /// <para>
-    /// So this array exists to record an approach where one is reported, and to say plainly
-    /// that none was where it is not. <see cref="SinceLastSeen"/> carries how long the gap
-    /// was. Anything wanting to know how the pen arrived has to infer it.
+    /// Measured on a clock that measures time, every landing of eight was inside the window
+    /// and the approaches came back 37 to 42 readings long. So this array now records what the
+    /// pen did on the way down, which is what it was added for, and
+    /// <see cref="SinceLastSeen"/> says how long the gap really was.
     /// </para>
     /// </para>
     /// </remarks>
@@ -320,6 +323,23 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
     public int AfterTheStop { get; private set; }
 
     public void OneAfterTheStop() => AfterTheStop++;
+
+    /// <summary>
+    /// Restores the counts a take was written with, for one read back from a file.
+    /// </summary>
+    /// <remarks>
+    /// These three are counted as readings arrive and cannot be recomputed from what was
+    /// kept -- that is the whole point of them, since the interesting case is a reading that
+    /// was handed over and stored nowhere. A take reopened without them would show a ledger
+    /// claiming nothing was ever handed over, which is the one reading of it that is never
+    /// true.
+    /// </remarks>
+    public void Reopened(int routed, int offPad, int afterTheStop)
+    {
+        Routed = routed;
+        DroppedOffPad = offPad;
+        AfterTheStop = afterTheStop;
+    }
 
     /// <summary>Every reading the recorder was handed while this take was open.</summary>
     public int Routed { get; private set; }

@@ -1,0 +1,68 @@
+<!-- EVERY x:Name HERE BECOMES A FIELD ON Analyser, so a name matching a method, a property or
+     a type this window uses breaks the build with an error pointing at generated code. Names
+     here read as controls for that reason: ReadingRows, StrokeHost, ChannelHost. -->
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="StrokeFieldGuide.Recorder.Analyser"
+        Width="1280" Height="820" WindowStartupLocation="CenterOwner"
+        Background="#F2F1EB" Title="Stroke">
+
+  <Window.Styles>
+    <Style Selector="TextBlock.label">
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="Foreground" Value="#8A8A82" />
+      <Setter Property="LetterSpacing" Value="0.6" />
+    </Style>
+    <Style Selector="Button">
+      <Setter Property="Padding" Value="11,5" />
+      <Setter Property="MinWidth" Value="0" />
+    </Style>
+  </Window.Styles>
+
+  <DockPanel Margin="14">
+
+    <Border DockPanel.Dock="Top" Margin="0,0,0,12">
+      <Grid ColumnDefinitions="*,Auto">
+        <StackPanel Spacing="2">
+          <TextBlock Name="Which" FontSize="17" FontWeight="SemiBold" />
+          <TextBlock Name="Summary" Classes="label" />
+        </StackPanel>
+        <Button Name="Shut" Grid.Column="1" Content="Close" VerticalAlignment="Top" />
+      </Grid>
+    </Border>
+
+    <!-- The transport, under everything it drives. -->
+    <Border DockPanel.Dock="Bottom" Margin="0,12,0,0">
+      <StackPanel Orientation="Horizontal" Spacing="6" HorizontalAlignment="Center">
+        <Button Name="ToStart" Content="|◀" />
+        <Button Name="Back" Content="◀ step" />
+        <Button Name="Play" Content="▶ play" />
+        <Button Name="On" Content="step ▶" />
+        <Button Name="ToEnd" Content="▶|" />
+        <TextBlock Name="Playhead" Classes="label" VerticalAlignment="Center" Margin="14,0,0,0" />
+      </StackPanel>
+    </Border>
+
+    <!-- Every reading of the stroke, the row being looked at picked out. -->
+    <Border DockPanel.Dock="Left" Width="430" Margin="0,0,12,0"
+            Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1" CornerRadius="4">
+      <DockPanel Margin="10">
+        <TextBlock DockPanel.Dock="Top" Text="Readings" Classes="label" Margin="0,0,0,6" />
+        <StackPanel DockPanel.Dock="Top" Name="ReadingHead" Margin="0,0,0,4" />
+        <ScrollViewer Name="ReadingScroll" VerticalScrollBarVisibility="Auto">
+          <StackPanel Name="ReadingRows" />
+        </ScrollViewer>
+      </DockPanel>
+    </Border>
+
+    <Grid RowDefinitions="*,Auto">
+      <Border Background="#FFFFFF" BorderBrush="#D8D8D2" BorderThickness="1" CornerRadius="4"
+              ClipToBounds="True">
+        <Panel Name="StrokeHost" />
+      </Border>
+
+      <StackPanel Grid.Row="1" Name="ChannelHost" Spacing="6" Margin="0,12,0,0" />
+    </Grid>
+
+  </DockPanel>
+</Window>

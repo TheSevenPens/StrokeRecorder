@@ -1,3 +1,9 @@
+<!-- EVERY x:Name HERE BECOMES A FIELD ON MainWindow.
+     So a name that matches a method, a property or a type this window uses breaks the build
+     with an error pointing at generated code rather than at either of them. It has happened
+     eight times: KeepAirborne against a member, Wants against a method, Ledger against a
+     method, Reopen against a whole class. Pick names that read as controls — LedgerHost,
+     StrokeRows, OpenTake — and the question does not arise. -->
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="StrokeFieldGuide.Recorder.MainWindow"
@@ -23,13 +29,17 @@
       <Setter Property="FontFamily" Value="Consolas,Menlo,monospace" />
       <Setter Property="FontSize" Value="16" />
     </Style>
+    <!-- Nine of these stack up in a 330px pane, so the padding and the minimum width are
+         what decide whether step one scrolls. Two to a row at 148 rather than one and a half
+         at 120, and the vertical padding halved: a readout is a label and a number, and it
+         was being given the room of a paragraph. -->
     <Style Selector="Border.readout">
       <Setter Property="Background" Value="#FFFFFF" />
       <Setter Property="BorderBrush" Value="#E2E2DC" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="CornerRadius" Value="4" />
-      <Setter Property="Padding" Value="10,7" />
-      <Setter Property="MinWidth" Value="120" />
+      <Setter Property="Padding" Value="9,4" />
+      <Setter Property="MinWidth" Value="148" />
     </Style>
     <!-- One finding. The stripe carries the tone, so the words do not have to. -->
     <Style Selector="Border.finding">
@@ -115,10 +125,10 @@
       <StackPanel Orientation="Horizontal" Spacing="8">
         <TextBlock Text="Record a stroke" Classes="h1" VerticalAlignment="Center"
                    Margin="0,0,20,0" />
-        <Border Classes="step" Name="Step1"><TextBlock Text="1  Your pen" /></Border>
+        <Border Classes="step" Name="Step1"><TextBlock Text="1  Pre-flight" /></Border>
         <Border Classes="step" Name="Step2"><TextBlock Text="2  Gesture" /></Border>
         <Border Classes="step" Name="Step3"><TextBlock Text="3  Record" /></Border>
-        <Border Classes="step" Name="Step4"><TextBlock Text="4  Review" /></Border>
+        <Border Classes="step" Name="Step4"><TextBlock Text="4  Analysis" /></Border>
         <Border Classes="step" Name="Step5"><TextBlock Text="5  Save" /></Border>
       </StackPanel>
     </Border>
@@ -144,17 +154,19 @@
 
     <Panel>
 
-    <Grid Name="StepOne" ColumnDefinitions="380,*" Margin="18">
+    <Grid Name="StepOne" ColumnDefinitions="330,*" Margin="18">
 
       <!-- ─────────────────────────────────────────────── what this step is for ── -->
       <!-- Scrolled, because the conventions line is as long as the backend makes it and a
            short window had it drawn over the foot. -->
+      <!-- Padding, not just the outer margin. A vertical scrollbar in this theme is drawn
+           inside the ScrollViewer's own bounds, so with no inner gutter every combo box and
+           text box ran right up under the bar and had its right edge covered by it. -->
       <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                    Margin="0,0,18,0">
-      <StackPanel Spacing="14">
-        <TextBlock Text="First, check the pen is reporting" FontSize="18"
-                   FontWeight="SemiBold" TextWrapping="Wrap" />
-
+                    Margin="0,0,18,0" Padding="0,0,12,0">
+      <!-- No heading. The step chips along the top already say which step this is, and the
+           sentence under them used to say it a second time at eighteen point. -->
+      <StackPanel Spacing="8">
         <StackPanel Spacing="4">
           <TextBlock Text="Backend" Classes="label" />
           <ComboBox Name="Backends" HorizontalAlignment="Stretch" />
@@ -162,18 +174,32 @@
                in the list; repeating it here was a paragraph nobody read twice. -->
           <TextBlock Name="BackendWorth" Classes="lede" FontSize="12" Margin="0,4,0,0"
                      IsVisible="False" />
+
+          <!-- The conventions belong to the backend, so they live under it rather than in a
+               card of their own further down. They are four words now that the wrapper is
+               off, which is a caption rather than a paragraph. -->
+          <TextBlock Name="Conventions" Classes="lede" FontSize="11" Margin="0,2,0,0" />
         </StackPanel>
 
-        <StackPanel Spacing="4">
-          <TextBlock Text="Nib size" Classes="label" />
-          <ComboBox Name="Size" HorizontalAlignment="Stretch" />
-        </StackPanel>
-
-        <CheckBox Name="Round" Content="Round nib, ignoring the lean" />
+        <!-- The combo is sized and the checkbox takes the rest. Under "*,Auto" the star
+             column ate the row and the checkbox label was clipped mid-word: its content is
+             measured after the star has taken what it wants. -->
+        <Grid ColumnDefinitions="150,*" ColumnSpacing="10">
+          <StackPanel Spacing="4">
+            <TextBlock Text="Nib size" Classes="label" />
+            <ComboBox Name="Size" HorizontalAlignment="Stretch" />
+          </StackPanel>
+          <CheckBox Name="Round" Grid.Column="1" Content="Round nib"
+                    VerticalAlignment="Bottom" />
+        </Grid>
 
         <!-- The same two fields as the save step, editing the same thing. Here because they
              are the answer to "which tablet is this", which a reader wants to see on the step
-             that is about the tablet, and not only when saving. -->
+             that is about the tablet, and not only when saving.
+
+             Tried on one row and put back. "Wacom driver 6.4.14-1" does not fit half of a
+             330px pane and was clipped mid-word, which is a poor trade for forty pixels of
+             height on a field whose whole job is to be read. -->
         <StackPanel Spacing="4">
           <TextBlock Text="Tablet" Classes="label" />
           <TextBox Name="ProbeTablet" Watermark="Wacom Cintiq 24" />
@@ -184,22 +210,37 @@
           <TextBox Name="ProbeDriver" Watermark="Wacom driver 6.4.14-1" />
         </StackPanel>
 
+        <!-- No Start/Stop. The session opens with the window and reopens whenever the
+             backend changes, so the button spent its life saying "Stop" and offering to undo
+             the thing this step exists to do. What it also did was let a failed open be
+             retried, which is now what picking the backend again is for. -->
+        <!-- Open a take belongs here and not on the analysis step, which is where it was
+             first put: that step cannot be reached without a take, so the control for
+             supplying one was behind the thing it supplies. A session either records a take
+             or opens one, and both choices are made on this step. -->
         <StackPanel Orientation="Horizontal" Spacing="8">
-          <Button Name="Start" Content="Start" />
-          <Button Name="Clear" Content="Clear the strip" />
+          <Button Name="Clear" Content="Clear" />
+          <Button Name="OpenTake" Content="Open a take…" />
         </StackPanel>
 
-        <Border Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
-                CornerRadius="4" Padding="12">
-          <StackPanel Spacing="6">
-            <TextBlock Name="Verdict" Classes="lede" Text="No session open." />
-            <TextBlock Name="Conventions" Classes="lede" FontSize="12" />
-          </StackPanel>
+        <TextBlock Name="Reopened" Classes="lede" FontSize="11" TextWrapping="Wrap" />
+
+        <!-- Only when something is wrong. "Waiting for the pen" and "Reporting, 168 points so
+             far" were a bordered card restating what the strip and the figures below it
+             already show; a backend that will not open is the one thing here that a reader
+             cannot see for themselves. -->
+        <Border Name="Trouble" Background="#FDF6EC" BorderBrush="#E0C9A0" BorderThickness="1"
+                CornerRadius="4" Padding="10,8" IsVisible="False">
+          <TextBlock Name="Verdict" Classes="lede" Text="" TextWrapping="Wrap" />
         </Border>
 
         <!-- The figures live with the words; the pictures live with the strip. Nine readouts
              in the instrument column left the strip nothing to be. -->
-        <WrapPanel Name="Readouts" Orientation="Horizontal" />
+        <!-- A StackPanel, because these are rows. A WrapPanel measures each child at its own
+             desired width, and a Grid whose first column is "*" wants nothing — so the rows
+             shrank to their contents and flowed side by side on one line. The record step
+             keeps its WrapPanel, where cards really are meant to wrap. -->
+        <StackPanel Name="Readouts" />
       </StackPanel>
       </ScrollViewer>
 
@@ -232,15 +273,15 @@
     <!-- ──────────────────────────────────────────────────────── five: save ── -->
     <Grid Name="StepFive" ColumnDefinitions="480,*" Margin="18" IsVisible="False">
 
+      <!-- Padding, not just the outer margin. A vertical scrollbar in this theme is drawn
+           inside the ScrollViewer's own bounds, so with no inner gutter every combo box and
+           text box ran right up under the bar and had its right edge covered by it. -->
       <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                    Margin="0,0,18,0">
-        <StackPanel Spacing="14">
-          <TextBlock Text="Say what made it, and keep it" FontSize="18"
-                     FontWeight="SemiBold" TextWrapping="Wrap" />
-
-          <TextBlock Classes="lede"
-                     Text="The session knows which API answered and what its full scale is. It cannot know which tablet is on the desk or which driver is installed, and those are what somebody comparing two recordings wants first." />
-
+                    Margin="0,0,18,0" Padding="0,0,12,0">
+        <!-- No heading and no preamble. The step chips say this is the save step, and the
+             paragraph explaining why a tablet and a driver are worth naming was answered by
+             the two fields directly beneath it being called Tablet and Driver. -->
+        <StackPanel Spacing="10">
           <StackPanel Spacing="4">
             <TextBlock Text="Tablet" Classes="label" />
             <TextBox Name="Tablet" Watermark="Wacom Cintiq 24" />
@@ -267,9 +308,12 @@
             <Button Name="ShowFolder" Content="Open the folder" />
           </StackPanel>
 
-          <Border Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
-                  CornerRadius="4" Padding="12">
-            <TextBlock Name="SaveState" Classes="lede" Text="Not saved yet." />
+          <!-- Shown once there is an answer. "Not saved yet." is the state every reader
+               arrives in and none of them needed telling; where it went, or why it did not
+               go, is the whole of what this card is for. -->
+          <Border Name="SaveCard" Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
+                  CornerRadius="4" Padding="12" IsVisible="False">
+            <TextBlock Name="SaveState" Classes="lede" Text="" TextWrapping="Wrap" />
           </Border>
         </StackPanel>
       </ScrollViewer>
@@ -290,14 +334,36 @@
     <!-- ────────────────────────────────────────────────────── four: review ── -->
     <Grid Name="StepFour" ColumnDefinitions="440,*" Margin="18" IsVisible="False">
 
+      <!-- Padding, not just the outer margin. A vertical scrollbar in this theme is drawn
+           inside the ScrollViewer's own bounds, so with no inner gutter every combo box and
+           text box ran right up under the bar and had its right edge covered by it. -->
       <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                    Margin="0,0,18,0">
+                    Margin="0,0,18,0" Padding="0,0,12,0">
         <StackPanel Spacing="12">
-          <TextBlock Text="What you actually recorded" FontSize="18"
-                     FontWeight="SemiBold" TextWrapping="Wrap" />
+          <!-- The counts, as counts. They used to be written into a finding as a sentence:
+               "218 were handed over, 104 are in strokes, 0 in the airborne record, 0 were off
+               the pad" is four numbers in prose, and a reader checking whether they add up had
+               to parse it first. A finding is for a conclusion; this is a ledger. -->
+          <!-- Which take this is. Only for one read back from a file: a take just recorded
+               needs no name, and the name of an opened one was being shown on the pre-flight,
+               which is a step the reader has left by the time they are reading this. -->
+          <TextBlock Name="Showing" Classes="label" IsVisible="False" TextWrapping="Wrap" />
 
-          <TextBlock Classes="lede"
-                     Text="Conclusions rather than figures, because a screen of figures is a screen nobody reads twice. Anything marked for attention is usable — it just is not evidence for what somebody would assume it was." />
+          <StackPanel Spacing="4">
+            <TextBlock Text="Every reading, and where it went" Classes="label" />
+            <!-- LedgerHost, not Ledger. A XAML name becomes a field on the window, and the
+                 method that fills this is called Ledger; the build then fails pointing at
+                 generated code rather than at either of them. Same trap as KeepAloft. -->
+            <StackPanel Name="LedgerHost" />
+          </StackPanel>
+
+          <!-- One row per stroke. StrokeRows, not Strokes: a XAML name becomes a field and
+               the method that fills it wants the obvious name. -->
+          <StackPanel Name="StrokeBlock" Spacing="4" IsVisible="False">
+            <TextBlock Text="Stroke by stroke — click to pick one out, double-click to open it"
+                       Classes="label" TextWrapping="Wrap" />
+            <StackPanel Name="StrokeRows" />
+          </StackPanel>
 
           <StackPanel Name="FindingList" Spacing="8" />
         </StackPanel>
@@ -312,67 +378,70 @@
     <!-- ────────────────────────────────────────────────────── three: record ── -->
     <Grid Name="StepThree" ColumnDefinitions="380,*" Margin="18" IsVisible="False">
 
+      <!-- Padding, not just the outer margin. A vertical scrollbar in this theme is drawn
+           inside the ScrollViewer's own bounds, so with no inner gutter every combo box and
+           text box ran right up under the bar and had its right edge covered by it. -->
       <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                    Margin="0,0,18,0">
+                    Margin="0,0,18,0" Padding="0,0,12,0">
         <StackPanel Spacing="14">
-          <TextBlock Name="TakeTitle" Text="Draw when you are ready" FontSize="18"
-                     FontWeight="SemiBold" TextWrapping="Wrap" />
-
-          <TextBlock Name="TakeBrief" Classes="lede" />
-
-          <TextBlock Classes="lede" FontSize="12"
-                     Name="HowItEnds" />
-
+          <!-- The clock carries the state beside it rather than above it. The heading, the
+               brief and the state line were four stacked blocks saying one thing: what the
+               recorder is doing right now. -->
           <Border Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
                   CornerRadius="4" Padding="12,8">
             <StackPanel Spacing="2">
-              <TextBlock Name="Clock" Text="0.00 s" FontSize="30" FontWeight="SemiBold"
-                         FontFamily="Consolas,Menlo,monospace" />
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBlock Name="Clock" Text="0.00 s" FontSize="28" FontWeight="SemiBold"
+                           FontFamily="Consolas,Menlo,monospace" />
+                <TextBlock Name="TakeTitle" Grid.Column="1" Classes="label"
+                           VerticalAlignment="Bottom" Text="Ready" />
+              </Grid>
               <TextBlock Name="Wanted" Classes="label" Text="" />
             </StackPanel>
           </Border>
 
-          <CheckBox Name="TakeRound" Content="Round nib, ignoring the lean" />
+          <CheckBox Name="TakeRound" Content="Round nib" />
 
           <!-- Named KeepAloft rather than KeepAirborne: a XAML Name becomes a field, and a
                field that collides with a member of this class fails the build in a way whose
                message points at neither. Five times now. -->
-          <StackPanel Spacing="2">
-            <CheckBox Name="KeepAloft" Content="Keep every airborne reading" />
-            <TextBlock Classes="lede" FontSize="11" Margin="24,0,0,0"
-                       Text="For working out what the pen is doing between strokes, not for recording strokes. Keeps the lot, unfiltered, including the packets that mean the pen has left range." />
+          <CheckBox Name="KeepAloft" Content="Record hover data" />
+
+          <!-- Above the nib block, not below it. This button was under a paragraph and a
+               combo box, which on a short window put it off the bottom of the pane — and a
+               reader who cannot see the button does not benefit from being told to press it. -->
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Button Name="Arm" Content="Arm" />
+            <Button Name="Again" Content="Re-record" IsEnabled="False" />
           </StackPanel>
 
+          <!-- Large is the point of this: a wobble of a tenth of the range is a fraction of a
+               pixel on a small nib and plainly visible on a wide one. -->
           <StackPanel Spacing="4">
             <TextBlock Text="Nib size" Classes="label" />
             <ComboBox Name="TakeSize" HorizontalAlignment="Stretch" />
-            <!-- Large is the point of this: a wobble of a tenth of the range is a fraction of
-                 a pixel on a small nib and plainly visible on a wide one. -->
-            <TextBlock Classes="lede" FontSize="11" Margin="0,2,0,0"
-                       Text="A light-pressure wobble is invisible at 10 and obvious at 300." />
           </StackPanel>
 
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <Button Name="Arm" Content="Arm" />
-            <Button Name="Again" Content="Throw it away" IsEnabled="False" />
-          </StackPanel>
-
-          <TextBlock Classes="lede" FontSize="11"
-                     Text="Space starts a recording and stops it again, so it is the only key you need. Escape only ever stops, for when that is all you want." />
-
-          <Border Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
-                  CornerRadius="4" Padding="12">
-            <StackPanel Spacing="6">
-              <TextBlock Name="TakeState" Classes="lede" Text="Not armed." />
-              <TextBlock Name="TakeDetail" Classes="lede" FontSize="12" />
-            </StackPanel>
-          </Border>
+          <!-- The state card is gone. Between the clock card at the top, the line under
+               Arm and the footer, four surfaces were telling a reader to press Arm, and this
+               was the fourth and the one that fell off the bottom of the pane. What it said
+               that nothing else did — why a finished take came back empty — moved to the
+               line under the clock. -->
+          <TextBlock Name="TakeDetail" Classes="lede" FontSize="12" TextWrapping="Wrap" />
         </StackPanel>
       </ScrollViewer>
 
       <DockPanel Grid.Column="1">
+        <!-- Two groups, not one wrapping row. The dials and the pressure trace take most of
+             the width, so a single WrapPanel fitted one figure beside them and pushed the
+             other two onto a line of their own. The figures now have their own column at the
+             right and stack in it. -->
         <Border DockPanel.Dock="Bottom" Margin="0,14,0,0">
-          <WrapPanel Name="TakeReadouts" Orientation="Horizontal" />
+          <Grid ColumnDefinitions="*,Auto">
+            <WrapPanel Name="TakeReadouts" Orientation="Horizontal" VerticalAlignment="Center" />
+            <StackPanel Name="TakeFigures" Grid.Column="1" VerticalAlignment="Center"
+                        MinWidth="150" Margin="16,0,0,0" />
+          </Grid>
         </Border>
 
         <Border Background="#FFFFFF" BorderBrush="#D8D8D2" BorderThickness="1"
@@ -385,12 +454,12 @@
     <!-- ───────────────────────────────────────────────────── two: the gesture ── -->
     <Grid Name="StepTwo" ColumnDefinitions="380,*" Margin="18" IsVisible="False">
 
+      <!-- Padding, not just the outer margin. A vertical scrollbar in this theme is drawn
+           inside the ScrollViewer's own bounds, so with no inner gutter every combo box and
+           text box ran right up under the bar and had its right edge covered by it. -->
       <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
-                    Margin="0,0,18,0">
-        <StackPanel Spacing="14">
-          <TextBlock Text="Next, decide what you are recording" FontSize="18"
-                     FontWeight="SemiBold" TextWrapping="Wrap" />
-
+                    Margin="0,0,18,0" Padding="0,0,12,0">
+        <StackPanel Spacing="10">
           <Border Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
                   CornerRadius="4" Padding="12">
             <StackPanel Spacing="6">
@@ -400,6 +469,11 @@
               <TextBlock Name="Wants" Classes="lede" Text="" />
             </StackPanel>
           </Border>
+
+          <!-- The same door as the pre-flight's. A session either records a take or opens
+               one, and both of the steps before the recording are places where somebody may
+               decide they meant the second. -->
+          <Button Name="OpenTakeTwo" Content="Open a take…" HorizontalAlignment="Left" />
         </StackPanel>
       </ScrollViewer>
 

@@ -8,6 +8,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml;
+using Avalonia.Platform.Storage;
 using Avalonia.Media;
 using WinPenKit.Diagnostics;
 using Avalonia.Threading;
@@ -61,6 +62,28 @@ public partial class MainWindow : Window
 
     private Remembered _remembered = Remembered.Read();
 
+    /// <summary>
+    /// The file this take was read back from, or null when it was recorded here.
+    /// </summary>
+    /// <remarks>
+    /// Kept so the analysis step can say which take it is showing. Set in one place and
+    /// cleared in one place: a banner announcing an opened file over a take just recorded is
+    /// worse than no banner, and setting the TextBlock directly from both paths is how that
+    /// happens.
+    /// </remarks>
+    private string? _opened;
+
+    /// <summary>
+    /// Which stroke of the take is picked out, or null for none.
+    /// </summary>
+    /// <remarks>
+    /// One at a time and nothing by default. A take of forty-two strokes is a wall of
+    /// identical rows and a drawing they all went into; picking one is how a reader asks
+    /// "which of these is that", and the answer has to be in the drawing rather than in the
+    /// table, because the table is what they are already looking at.
+    /// </remarks>
+    private int? _picked;
+
     private double _diameter = 26;
 
     /// <summary>
@@ -95,15 +118,61 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _poll;
 
     private readonly Readout _api = new("api");
-    private readonly Readout _range = new("full-scale pressure");
-    private readonly Readout _pressure = new("pressure");
+    /// <summary>
+    /// The largest pressure the open backend will ever report.
+    /// </summary>
+    /// <remarks>
+    /// Labelled with the backend that said so, because only one of them is answering from the
+    /// hardware. Wintab queries the device and gets this tablet's real 32767; WM_POINTER,
+    /// WinUI, Avalonia and WinForms all return a hard-coded 1024, which is the API's
+    /// normalisation range and says nothing about the pen. A reader comparing two backends
+    /// needs to know which kind of number they are looking at, and the two look identical.
+    /// </remarks>
+    private readonly Readout _range = new("max pressure level");
     private readonly Readout _tiltX = new("tilt x");
     private readonly Readout _tiltY = new("tilt y");
-    private readonly Readout _azimuth = new("azimuth");
-    private readonly Readout _altitude = new("altitude");
-    private readonly Readout _twist = new("twist");
-    private readonly Readout _rate = new("points a second");
-    private readonly Readout _batch = new("per poll");
+    /// <summary>
+    /// What the pen is pressing right now, as a number.
+    /// </summary>
+    /// <remarks>
+    /// The bar to the right of the dials shows the same reading and is the better thing for
+    /// watching it move, which is why this was taken out with the other three the dials
+    /// already carried. It is back because a bar answers "is it changing" and a figure answers
+    /// "what is it", and on a pre-flight beside the maximum it can reach, the second question
+    /// is the one being asked.
+    /// </remarks>
+    private readonly Readout _pressure = new("pressure");
+    /// <summary>Readings a second, counted over a rolling one-second window of arrivals.</summary>
+    private readonly Readout _rate = new("rate");
+
+    /// <summary>
+    /// How many readings were waiting in the session's queue when it was last emptied.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Literally a queue depth, not a figure of speech: WinPenKit holds a
+    /// <c>ConcurrentQueue&lt;PenPoint&gt;</c>, the driver enqueues one reading per packet, and
+    /// this window drains the whole thing every 16 ms. Each item is a complete reading -- the
+    /// position, the pressure, the angles and the timestamp -- so the depth counts readings and
+    /// not packets or bytes.
+    /// </para>
+    /// <para>
+    /// <b>Zero is not the healthy value here</b>, which is where the instinct from a mail queue
+    /// misleads. The queue exists because the pen reports at about 162 a second and this window
+    /// looks 60 times a second, so a small standing depth is the buffer doing its job. Expect
+    /// <c>rate × poll interval</c>: 161.6 × 17.2 ms is 2.8, and three takes measured 2.72, 2.97
+    /// and 3.18 with a median of 3 in all three.
+    /// </para>
+    /// <para>
+    /// So: 0 means nothing is arriving, 2 or 3 is keeping up, and anything sustained above
+    /// about five means the polls are landing late. The queue is unbounded, so a spike means
+    /// <em>late</em> and never <em>lost</em> -- which is the reason to show it at all, because
+    /// it is what tells a stuttering application apart from a pen that has stopped, and those
+    /// look identical everywhere else in this project. The range beside it carries that: the
+    /// worst poll of a take is the thing worth catching and the current one is not.
+    /// </para>
+    /// </remarks>
+    private readonly Readout _batch = new("queue depth");
 
     private IPenSession? _session;
 
@@ -210,7 +279,6 @@ public partial class MainWindow : Window
 
     private readonly Readout _took = new("readings");
     private readonly Readout _lasted = new("milliseconds");
-    private readonly Readout _takePressure = new("pressure");
 
     private PenPoint _last;
     private bool _haveLast;
@@ -301,7 +369,7 @@ public partial class MainWindow : Window
 
         foreach (var readout in All)
         {
-            this.FindControl<WrapPanel>("Readouts")!.Children.Add(readout.Build().Visual);
+            this.FindControl<StackPanel>("Readouts")!.Children.Add(readout.AsRow().Visual);
         }
 
         var backends = this.FindControl<ComboBox>("Backends")!;
@@ -323,7 +391,6 @@ public partial class MainWindow : Window
 
         backends.SelectionChanged += (_, _) => Chose();
 
-        this.FindControl<Button>("Start")!.Click += (_, _) => StartOrStop();
         this.FindControl<Button>("Clear")!.Click += (_, _) => Wipe();
 
         BuildGestures();
@@ -332,10 +399,16 @@ public partial class MainWindow : Window
         this.FindControl<WrapPanel>("TakeReadouts")!.Children.Add(_takeGauges);
         this.FindControl<WrapPanel>("TakeReadouts")!.Children.Add(_takeTrace);
 
+        // Rows in their own column, for the reason the pre-flight's are rows: three figures
+        // beside a set of dials is a table, and as cards they wrapped onto a second line and
+        // left the first one short.
         foreach (var readout in Taken)
         {
-            this.FindControl<WrapPanel>("TakeReadouts")!.Children.Add(readout.Build().Visual);
+            this.FindControl<StackPanel>("TakeFigures")!.Children.Add(readout.AsRow().Visual);
         }
+
+        this.FindControl<Button>("OpenTake")!.Click += async (_, _) => await Reread();
+        this.FindControl<Button>("OpenTakeTwo")!.Click += async (_, _) => await Reread();
 
         this.FindControl<Button>("Save")!.Click += (_, _) => Keep();
         this.FindControl<Button>("ShowFolder")!.Click += (_, _) => OpenFolder();
@@ -408,6 +481,26 @@ public partial class MainWindow : Window
         };
 
         Chose();
+
+        // The gesture picked for the reader rather than waiting to be. Every other entry names a
+        // thing to draw, so choosing one is a decision about what the session is for; the first
+        // asks nothing and keeps recording until you stop, which is the closest thing to picking
+        // a pen up. Nothing stops a reader picking another -- this only decides what is already
+        // selected when they arrive, so the step can be passed through rather than answered.
+        //
+        // Here and not in BuildGestures, which runs halfway up this constructor: Chose(Gesture)
+        // ends in Refresh(), and Refresh touches controls wired below that point.
+        //
+        // Taken off the card rather than from Gestures.All. That property is expression-bodied
+        // and builds a fresh list on every read, so Gestures.All[0] is a different object from
+        // the one BuildGestures hung on the card -- and Chose marks the picked card with
+        // ReferenceEquals, which then matched nothing. The pane said "Multi-stroke drawing"
+        // and not one card looked chosen, which is worse than choosing nothing.
+        if (this.FindControl<WrapPanel>("GestureList")!.Children.FirstOrDefault()
+            is ToggleButton first && first.Tag is Gesture opening)
+        {
+            Chose(opening);
+        }
 
         // Not from the constructor. A WM_POINTER session subclasses the window handle and a
         // Wintab one wants a window in the foreground, and at this point there is no window
@@ -628,13 +721,11 @@ public partial class MainWindow : Window
                 FontSize = 15,
                 Foreground = new SolidColorBrush(Color.Parse("#2B2B28")),
             },
-            new TextBlock
-            {
-                Text = gesture.Detail,
-                TextWrapping = TextWrapping.Wrap,
-                Foreground = new SolidColorBrush(Color.Parse("#4A4A46")),
-                LineHeight = 19,
-            },
+
+            // No description. Seven cards each carrying two or three lines of instruction made
+            // a wall to read before anything could be picked, and the detail is already on the
+            // left, for the one gesture the reader has actually chosen. The shape and the name
+            // are what a card has to carry to be picked from.
         },
     };
 
@@ -655,7 +746,15 @@ public partial class MainWindow : Window
         Refresh();
     }
 
-    private Readout[] Taken => [_took, _lasted, _takePressure];
+    /// <summary>
+    /// The figures beside the dials while a take runs.
+    /// </summary>
+    /// <remarks>
+    /// No pressure. The trace next to them is a second-by-second picture of exactly that
+    /// reading, with its own caption saying the number and the share of full scale, and a
+    /// figure repeating it added nothing the eye was not already getting from the line.
+    /// </remarks>
+    private Readout[] Taken => [_took, _lasted];
 
     /// <summary>The nib this window draws with, and shows a cursor for.</summary>
     /// <remarks>
@@ -670,8 +769,22 @@ public partial class MainWindow : Window
     /// exercises the control the guide has just grown, on a real hand, which no fixture can.
     /// </para>
     /// </remarks>
-    private Nib Brush(int fullScale) => new(
-        _diameter, SKColors.Black.WithAlpha(0xD0), 0.25, Buildup.PerStamp,
+    /// <summary>The take's own ink.</summary>
+    private static readonly SKColor Ink = SKColors.Black.WithAlpha(0xD0);
+
+    /// <summary>
+    /// The colour a picked stroke is drawn in.
+    /// </summary>
+    /// <remarks>
+    /// Warm and dark enough to read against the paper at full opacity, and far enough from
+    /// black to be unmistakable where it crosses the rest of the take -- which on a
+    /// cross-hatching take it does constantly. Opaque, because it is drawn over the ink and a
+    /// translucent mark would come out as a muddied black rather than as a colour.
+    /// </remarks>
+    private static readonly SKColor Highlight = new(0xB4, 0x54, 0x1E);
+
+    private Nib Brush(int fullScale, SKColor? colour = null) => new(
+        _diameter, colour ?? Ink, 0.25, Buildup.PerStamp,
         new Width(Math.Min(0.5, _diameter / 20), _diameter, (uint)Math.Max(1, fullScale)),
         SpacedBy.Diameters,
         Nib: _round ? null : new StrokeFieldGuide.Brushes.Nib(0.3, 0, Held.ToTheLean));
@@ -797,7 +910,6 @@ public partial class MainWindow : Window
 
                 _took.Saw(_take.Count);
                 _lasted.Saw(_take.Milliseconds);
-                _takePressure.Saw(reading.Pressure);
 
                 Tick();
             }
@@ -974,6 +1086,7 @@ public partial class MainWindow : Window
         _pad.Clear();
         DrawGuide();
 
+        _opened = null;
         _take = new Take(_gesture!, session.Api, session.MaxPressure, _pad.ForPen())
         {
             Conventions = session.Conventions.ToString() ?? "",
@@ -1066,6 +1179,7 @@ public partial class MainWindow : Window
             // cannot be taken at save time; arming happens on this step with the pad on screen
             // and the window settled, which satisfies the same requirement and gives the whole
             // series one transform instead of the first stroke's.
+            _opened = null;
             _take = new Take(_gesture, armed.Api, armed.MaxPressure, _pad.ForPen())
             {
                 Conventions = armed.Conventions.ToString() ?? "",
@@ -1114,6 +1228,7 @@ public partial class MainWindow : Window
 
     private void Discard()
     {
+        _opened = null;
         _take = null;
         _capture = Capture.Idle;
 
@@ -1165,7 +1280,21 @@ public partial class MainWindow : Window
 
         this.FindControl<TextBlock>("Clock")!.Text = $"{seconds:F2} s";
 
-        this.FindControl<TextBlock>("Wanted")!.Text = _gesture is null
+        this.FindControl<TextBlock>("Wanted")!.Text = Doing();
+    }
+
+    /// <summary>
+    /// The word under the clock: what the recorder is doing, in one or two words.
+    /// </summary>
+    /// <remarks>
+    /// Not called Wants. Step two has a TextBlock of that name, the Avalonia name generator
+    /// turns every x:Name into a field on this class, and a method sharing the name fails the
+    /// build with a message that points at generated code rather than at either of them. The
+    /// file already carries this warning next to KeepAloft, and it caught me anyway.
+    /// </remarks>
+    private string Doing()
+    {
+        return _gesture is null
             ? ""
             : _gesture.ManyStrokes
                 ? _capture switch
@@ -1224,23 +1353,18 @@ public partial class MainWindow : Window
         };
 
         this.FindControl<TextBlock>("TakeTitle")!.Text = title;
-        this.FindControl<TextBlock>("TakeState")!.Text = state;
 
-        this.FindControl<TextBlock>("TakeBrief")!.Text = _gesture?.Detail ?? "";
+        // The state used to have a card of its own at the foot of the pane, repeating what
+        // the clock card, the line under Arm and the footer all said. It is only worth a line
+        // once there is a take to describe -- before that, "not armed" is the one thing on
+        // this screen nobody has ever needed telling.
+        this.FindControl<TextBlock>("Wanted")!.Text =
+            _capture == Capture.Taken ? state : Doing();
 
-        // How a take ends is not the same sentence for every gesture, and it used to be
-        // written into the XAML as though it were. A gesture that keeps recording across
-        // lifts makes the old wording exactly wrong: it says there is nothing to press, on
-        // the one screen where something has to be.
-        this.FindControl<TextBlock>("HowItEnds")!.Text = _gesture?.ManyStrokes == true
-            ? "Press Arm to start. From that moment the recording is running -- the clock, the "
-              + "pen in the air, and every stroke you draw -- and it keeps going across pen "
-              + "lifts, so the whole series lands in one file with the gaps intact. Press "
-              + "Stop, Escape or the space bar when the series is finished. None of those can "
-              + "start one, so it is the only key you need; Escape only ever stops."
-            : "The recording starts when the tip touches down and ends when it lifts, so "
-              + "there is nothing to press at either end. The guide on the pad is there to "
-              + "follow and is not part of what is recorded.";
+        // No brief and no how-it-ends. Both said what the gesture was and how to start it,
+        // which step two has just finished saying and the footer says again; between them and
+        // the clock, four surfaces described the same recording. What the keys do lives in the
+        // footer, which is the one that fits on every window.
 
         this.FindControl<TextBlock>("TakeDetail")!.Text = _capture switch
         {
@@ -1415,12 +1539,27 @@ public partial class MainWindow : Window
             brush.Draw(_replay.Surface, _take.Placed, stroke);
         }
 
+        // The picked one again, over the top, in the accent. Drawn second rather than drawn
+        // differently in the loop above: a stroke that crosses others has to sit over them to
+        // be followed, and on a cross-hatching take every stroke crosses several.
+        if (_picked is { } which && which < _take.Contacts.Count
+            && _take.Contacts[which].Stroke is { } only)
+        {
+            Brush(_take.FullScalePressure, Highlight).Draw(_replay.Surface, _take.Placed, only);
+        }
+
         _replay.Redraw();
     }
 
     private void Review()
     {
+        var showing = this.FindControl<TextBlock>("Showing")!;
+        showing.Text = _opened is null ? "" : $"Opened · {_opened}";
+        showing.IsVisible = _opened is not null;
+
         Replayed();
+        Ledger();
+        Strokes();
 
         var list = this.FindControl<StackPanel>("FindingList")!;
         list.Children.Clear();
@@ -1660,9 +1799,9 @@ public partial class MainWindow : Window
             _remembered = _remembered with { Tablet = _take.Tablet, Driver = _take.Driver };
             _remembered.Write();
 
-            this.FindControl<TextBlock>("SaveState")!.Text = _take.Named
+            Wrote(_take.Named
                 ? $"Saved to {_saved}"
-                : $"Saved to {_saved}, with the tablet and the driver unnamed.";
+                : $"Saved to {_saved}, with the tablet and the driver unnamed.");
         }
         catch (Exception bad)
         {
@@ -1670,11 +1809,17 @@ public partial class MainWindow : Window
             // though it had is the worst outcome this screen has.
             _saved = null;
 
-            this.FindControl<TextBlock>("SaveState")!.Text =
-                $"Could not save: {bad.Message}";
+            Wrote($"Could not save: {bad.Message}");
         }
 
         Foot();
+    }
+
+    /// <summary>Says where the take went, or why it did not, and shows the card that says it.</summary>
+    private void Wrote(string outcome)
+    {
+        this.FindControl<TextBlock>("SaveState")!.Text = outcome;
+        this.FindControl<Border>("SaveCard")!.IsVisible = outcome.Length > 0;
     }
 
     private void OpenFolder()
@@ -1688,8 +1833,382 @@ public partial class MainWindow : Window
         opening.Start();
     }
 
-    private Readout[] All =>
-        [_api, _range, _pressure, _tiltX, _tiltY, _azimuth, _altitude, _twist, _rate, _batch];
+    /// <summary>The figures worth a number, which is not the same set as the figures worth showing.</summary>
+    /// <remarks>
+    /// Pressure, azimuth, altitude and twist used to be here too, and each of them is already on
+    /// a dial three inches to the right: the lean dial is a polar plot of azimuth and altitude,
+    /// the barrel dial is twist, and the bar beside them is pressure. Ten cards at two to a row
+    /// was five rows of duplicate, which is most of what made this step scroll.
+    /// <para>
+    /// Tilt x and y stay, because no dial shows them. They carry the device's own sign
+    /// convention -- on the tablet measured here a lean to the right reports a <em>negative</em>
+    /// x -- and that is a fact about the hardware that the derived lean and azimuth have already
+    /// thrown away.
+    /// </para>
+    /// <para>
+    /// The api readout went the same way, for the same reason one step further up: it read
+    /// "WintabDigitizer" directly beneath a combo box reading "Wintab (digitizer)".
+    /// </para>
+    /// <para>
+    /// Pressure came back, as a figure rather than only the bar: beside the maximum the
+    /// backend will report, the question on this step is what the pen is pressing now, and a
+    /// bar answers a different one. A count of points seen went the other way -- how much was
+    /// recorded is what the record and analysis steps are for, and a pre-flight only has to
+    /// show that something is arriving.
+    /// </para>
+    /// </remarks>
+    private Readout[] All => [_range, _pressure, _tiltX, _tiltY, _rate, _batch];
+
+    /// <summary>
+    /// Where every reading of the take ended up, as a column of counts.
+    /// </summary>
+    /// <remarks>
+    /// A ledger and not a finding. The counts used to be written into a sentence -- "218 were
+    /// handed over, 104 are in strokes, 0 in the airborne record, 0 were off the pad" -- and a
+    /// reader wanting to know whether they add up had to take the prose apart first. Set out
+    /// in a column they add up or they visibly do not, which is the only question anybody has
+    /// ever asked of them.
+    /// <para>
+    /// The rows above the rule belong to the layer below this window and are absent when the
+    /// session could not be asked. The rows below it are this window's own, and their total is
+    /// checked against what it was handed.
+    /// </para>
+    /// </remarks>
+    private void Ledger()
+    {
+        var host = this.FindControl<StackPanel>("LedgerHost")!;
+        host.Children.Clear();
+
+        if (_take is not { } take) return;
+
+        if (take.Counted is { } counted)
+        {
+            host.Children.Add(Tally("from the driver", counted.FromDriver));
+            host.Children.Add(Tally("outside the capture region", counted.OutsideRegion));
+            host.Children.Add(Tally("delivered to this window", counted.Delivered));
+        }
+
+        host.Children.Add(Tally("handed over", take.Routed, rule: true));
+        host.Children.Add(Tally("in strokes", take.Count));
+        host.Children.Add(Tally("in the airborne record", take.Aloft.Count));
+        host.Children.Add(Tally("off the pad", take.DroppedOffPad));
+        host.Children.Add(Tally("after the stop", take.AfterTheStop));
+
+        var stored = take.Count + take.Aloft.Count + take.DroppedOffPad + take.AfterTheStop;
+
+        // Only when it fails. A ledger that balances needs no line saying so; one that does
+        // not is the most important thing on the screen.
+        if (stored != take.Routed)
+        {
+            host.Children.Add(Tally($"unaccounted for", take.Routed - stored, alarm: true));
+        }
+    }
+
+    /// <summary>
+    /// Every stroke of the take, one to a row.
+    /// </summary>
+    /// <remarks>
+    /// Durations come off <see cref="Reading.Arrived"/> and not <see cref="Reading.At"/>. The
+    /// pen's own stamp advances a flat 4.166 ms per packet whatever the elapsed time, so a
+    /// column of stroke lengths taken from it is a column of reading counts wearing a unit.
+    /// </remarks>
+    /// <summary>
+    /// Opens a trace from disk and shows it on this step.
+    /// </summary>
+    /// <remarks>
+    /// The take it makes is a reading of the file and not a recording: it has no session
+    /// behind it and nothing will be added to it. That is what this step wants -- everything
+    /// on it is a description of readings that have already been taken.
+    /// </remarks>
+    private async Task Reread()
+    {
+        var said = this.FindControl<TextBlock>("Reopened")!;
+
+        var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Open a take",
+            AllowMultiple = false,
+            SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(TakesFolder),
+            FileTypeFilter = [new FilePickerFileType("Traces") { Patterns = ["*.json"] }],
+        });
+
+        if (picked.Count == 0) return;
+
+        var path = picked[0].TryGetLocalPath();
+
+        if (path is null)
+        {
+            said.Text = "That file is not on this machine.";
+
+            return;
+        }
+
+        var read = Reopen.From(path);
+
+        if (read.Take is not { } take)
+        {
+            said.Text = $"Could not open it: {read.Why}";
+
+            return;
+        }
+
+        _take = take;
+        _capture = Capture.Taken;
+        _gesture = take.Gesture;
+
+        var name = Path.GetFileNameWithoutExtension(path);
+
+        said.Text = name;
+
+        _opened = name;
+
+        // Straight to the analysis, which is the only reason to open one. GoTo is what moves
+        // a step; Stage only redraws the record step's own words, so setting _step beside it
+        // left the reader on the pre-flight with a take loaded and nothing to show for it.
+        GoTo(4);
+    }
+
+    private void Strokes()
+    {
+        var block = this.FindControl<StackPanel>("StrokeBlock")!;
+        var rows = this.FindControl<StackPanel>("StrokeRows")!;
+
+        rows.Children.Clear();
+
+        // Out of range for this take. Reopening a shorter one with a stroke picked would
+        // otherwise leave a selection pointing past the end of it.
+        if (_picked >= (_take?.Contacts.Count ?? 0)) _picked = null;
+
+        // One stroke needs no table: everything a row would say is already in the findings
+        // and the ledger, and a table of one is a heading with a line under it.
+        if (_take is not { Strokes: > 1 } take)
+        {
+            block.IsVisible = false;
+
+            return;
+        }
+
+        block.IsVisible = true;
+
+        rows.Children.Add(Ruled("#", "n", "ms", "px", "peak", "appr", head: true));
+
+        for (var each = 0; each < take.Contacts.Count; each++)
+        {
+            var contact = take.Contacts[each];
+
+            if (contact.Count == 0) continue;
+
+            var readings = contact.Readings;
+
+            var ms = (readings[^1].Arrived - readings[0].Arrived) / 1000.0;
+
+            var length = 0.0;
+            for (var step = 1; step < readings.Count; step++)
+            {
+                length += Math.Sqrt(Math.Pow(readings[step].X - readings[step - 1].X, 2)
+                                  + Math.Pow(readings[step].Y - readings[step - 1].Y, 2));
+            }
+
+            var which = each;
+
+            var row = Ruled(
+                $"{each + 1}",
+                $"{contact.Count}",
+                $"{ms:F0}",
+                $"{length:F0}",
+                $"{readings.Max(reading => reading.Pressure):N0}",
+                contact.Approach.Count > 0 ? $"{contact.Approach.Count}" : "—");
+
+            var hit = new Border
+            {
+                Child = row,
+                Padding = new Thickness(4, 2, 4, 2),
+                CornerRadius = new CornerRadius(3),
+                Cursor = new Avalonia.Input.Cursor(Avalonia.Input.StandardCursorType.Hand),
+                // Fully qualified: this file has "using StrokeFieldGuide.Brushes", so a bare
+                // Brushes is the guide's namespace of brush engines and not Avalonia's palette.
+                Background = _picked == which
+                    ? new SolidColorBrush(Color.Parse("#F3E4D8"))
+                    : Avalonia.Media.Brushes.Transparent,
+            };
+
+            // One click picks the stroke out of the drawing; two open it on its own. Clicking
+            // the row it is already on clears it, so a reader can put the drawing back without
+            // hunting for somewhere else to click.
+            hit.PointerPressed += (_, click) =>
+            {
+                if (click.ClickCount >= 2)
+                {
+                    _picked = which;
+
+                    Replayed();
+                    Strokes();
+                    Closer(which);
+
+                    return;
+                }
+
+                _picked = _picked == which ? null : which;
+
+                Replayed();
+                Strokes();
+            };
+
+            rows.Children.Add(hit);
+        }
+    }
+
+    /// <summary>
+    /// Opens one stroke in the analyser.
+    /// </summary>
+    /// <remarks>
+    /// A window rather than a step, because a reader goes into one stroke and comes back to the
+    /// take: making it a step would put the take's own analysis behind a Back button and lose
+    /// which stroke they had picked.
+    /// </remarks>
+    private void Closer(int which)
+    {
+        if (_take is not { } take || which >= take.Contacts.Count) return;
+
+        if (take.Contacts[which].Count == 0) return;
+
+        Analyser.For(take.Contacts[which], which + 1, take.Strokes, _opened ?? "this take")
+                .Show(this);
+    }
+
+    /// <summary>One row of the stroke table, or its header.</summary>
+    private static Control Ruled(string index, string count, string ms, string px,
+                                 string peak, string approach, bool head = false)
+    {
+        var grid = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("28,*,*,*,*,52"),
+            Margin = new Thickness(0, 0, 0, head ? 3 : 2),
+        };
+
+        var ink = head ? "#7A7A74" : "#3A3A36";
+        var cells = new[] { index, count, ms, px, peak, approach };
+
+        for (var column = 0; column < cells.Length; column++)
+        {
+            var cell = new TextBlock
+            {
+                Text = cells[column],
+                FontFamily = head ? FontFamily.Default : new FontFamily("Consolas,Menlo,monospace"),
+                FontSize = head ? 10 : 12,
+                Foreground = new SolidColorBrush(Color.Parse(ink)),
+                TextAlignment = column == 0
+                    ? Avalonia.Media.TextAlignment.Left
+                    : Avalonia.Media.TextAlignment.Right,
+                Margin = new Thickness(0, 0, 8, 0),
+            };
+
+            Grid.SetColumn(cell, column);
+            grid.Children.Add(cell);
+        }
+
+        if (!head) return grid;
+
+        return new StackPanel
+        {
+            Children =
+            {
+                grid,
+                new Border
+                {
+                    BorderBrush = new SolidColorBrush(Color.Parse("#D8D8D2")),
+                    BorderThickness = new Thickness(0, 1, 0, 0),
+                    Margin = new Thickness(0, 0, 0, 4),
+                },
+            },
+        };
+    }
+
+    /// <summary>One row of the ledger: what it is on the left, how many on the right.</summary>
+    private static Control Tally(string what, long many, bool rule = false, bool alarm = false)
+    {
+        var grid = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+            Margin = new Thickness(0, rule ? 6 : 0, 0, 3),
+        };
+
+        var ink = alarm ? "#A6371F" : "#3A3A36";
+
+        var name = new TextBlock
+        {
+            Text = what,
+            FontSize = 11.5,
+            Foreground = new SolidColorBrush(Color.Parse(alarm ? ink : "#7A7A74")),
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+        };
+
+        var count = new TextBlock
+        {
+            Text = many.ToString("N0"),
+            FontFamily = new FontFamily("Consolas,Menlo,monospace"),
+            FontSize = 13,
+            FontWeight = alarm ? FontWeight.SemiBold : FontWeight.Normal,
+            Foreground = new SolidColorBrush(Color.Parse(ink)),
+        };
+
+        Grid.SetColumn(name, 0);
+        Grid.SetColumn(count, 1);
+        grid.Children.Add(name);
+        grid.Children.Add(count);
+
+        if (!rule) return grid;
+
+        // A line where the layer changes. Above it is what the session counted, below it is
+        // what this window did with what it was given, and the two are different claims.
+        return new StackPanel
+        {
+            Children =
+            {
+                new Border
+                {
+                    BorderBrush = new SolidColorBrush(Color.Parse("#D8D8D2")),
+                    BorderThickness = new Thickness(0, 1, 0, 0),
+                    Margin = new Thickness(0, 2, 0, 0),
+                },
+                grid,
+            },
+        };
+    }
+
+    /// <summary>What a backend is called in a caption, as against in the enum.</summary>
+    private static string Sounds(InputApi api) => api switch
+    {
+        InputApi.WintabSystem or InputApi.WintabDigitizer => "Wintab",
+        InputApi.WmPointer => "WM_POINTER",
+        _ => api.ToString(),
+    };
+
+    /// <summary>
+    /// The conventions line with its wrapper and its field names taken off.
+    /// </summary>
+    /// <remarks>
+    /// <c>PenConventions { RawUnits = TabletNative, Buttons = WintabEvent, Cursor =
+    /// DeviceAssigned, Timestamp = DeviceTicks }</c> is four facts and about sixty characters of
+    /// syntax around them, and at this pane's width that syntax was three wrapped lines. The
+    /// values are distinctive enough to read alone -- nobody who needs to know the timestamps are
+    /// device ticks is helped by being told the field is called Timestamp.
+    /// </remarks>
+    private static string Plainly(string conventions)
+    {
+        var open = conventions.IndexOf('{');
+        var close = conventions.LastIndexOf('}');
+
+        // Not the shape this expects. Show it as it came rather than a mangled half of it.
+        if (open < 0 || close <= open) return conventions;
+
+        var inside = conventions[(open + 1)..close];
+
+        return string.Join(" · ", inside
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(pair => pair[(pair.IndexOf('=') + 1)..].Trim())
+            .Where(value => value.Length > 0));
+    }
 
     private void InitializeComponent() => AvaloniaXamlLoader.Load(this);
 
@@ -1903,8 +2422,6 @@ public partial class MainWindow : Window
               + "not running."
             : "";
 
-        this.FindControl<Button>("Start")!.IsEnabled = chosen is { Available: true };
-
         // Switching backend closes what was open and opens the new one. Leaving the reader
         // to press a button in between makes the commonest use of this window -- comparing
         // what two backends say about the same pen -- three clicks instead of one, and
@@ -1913,12 +2430,6 @@ public partial class MainWindow : Window
         Shut();
 
         if (_shown) Open();
-    }
-
-    private void StartOrStop()
-    {
-        if (_session is not null) Shut();
-        else Open();
     }
 
     /// <summary>Closes the session, if there is one. Safe to call when there is not.</summary>
@@ -1931,17 +2442,14 @@ public partial class MainWindow : Window
 
         _poll.Stop();
 
-        this.FindControl<Button>("Start")!.Content = "Start";
-
-        Say("Session closed.", "");
+        this.FindControl<TextBlock>("Conventions")!.Text = "";
+        Say("", "");
 
         Refresh();
     }
 
     private void Open()
     {
-        var button = this.FindControl<Button>("Start")!;
-
         if (Chosen is not { Available: true } chosen) return;
 
         // The window, not the pad. A framework session listens on the control it is given,
@@ -1961,7 +2469,7 @@ public partial class MainWindow : Window
         {
             session.Dispose();
 
-            Say($"Could not start: {failure}", "");
+            Say($"Could not start: {failure}", "", trouble: true);
 
             return;
         }
@@ -1971,13 +2479,11 @@ public partial class MainWindow : Window
         _seen = 0;
         _arrivals.Clear();
 
-        button.Content = "Stop";
-
         _api.Set(session.Api.ToString());
         _range.Set(session.MaxPressure.ToString());
+        _range.Relabel($"max pressure level ({Sounds(session.Api)})");
 
-        Say("Waiting for the pen.",
-            $"{session.Conventions}");
+        Say("Waiting for the pen.", Plainly(session.Conventions.ToString() ?? ""));
 
         _poll.Start();
 
@@ -2048,20 +2554,15 @@ public partial class MainWindow : Window
 
         Aim(shown, session.MaxPressure);
 
-        _pressure.Saw(last.Pressure);
         _tiltX.Saw(last.TiltX);
         _tiltY.Saw(last.TiltY);
-        _azimuth.Saw(last.Azimuth);
-        _altitude.Saw(last.Altitude);
-        _twist.Saw(last.Twist);
 
         // The angles have their own boxes now, with the ranges that make them worth reading.
         // The first point is what makes step one answerable, so the foot has to hear about
         // it. Cheap enough to do on every drain rather than only on the first.
         Refresh();
 
-        Say($"Reporting. {_seen} points so far.",
-            $"reported by {last.Source}, buttons {last.Buttons}");
+        _pressure.Saw(last.Pressure);
 
     }
 
@@ -2189,10 +2690,24 @@ public partial class MainWindow : Window
         _gauges.Forget();
     }
 
-    private void Say(string verdict, string conventions)
+    /// <param name="trouble">
+    /// Whether <paramref name="verdict"/> is something a reader has to act on. Routine progress
+    /// is not: "waiting for the pen" and "reporting, 168 points so far" are both answered by the
+    /// strip and by the figures beside it, and putting them in a bordered card meant the one
+    /// message that matters -- a backend that will not open -- looked exactly like the two that
+    /// do not.
+    /// </param>
+    private void Say(string verdict, string conventions, bool trouble = false)
     {
         this.FindControl<TextBlock>("Verdict")!.Text = verdict;
-        this.FindControl<TextBlock>("Conventions")!.Text = conventions;
+        this.FindControl<Border>("Trouble")!.IsVisible = trouble && verdict.Length > 0;
+
+        // Left alone when there is nothing to say. The conventions belong to the open session
+        // and are not news that arrives with each message, so a routine Say must not wipe them.
+        if (conventions.Length > 0)
+        {
+            this.FindControl<TextBlock>("Conventions")!.Text = conventions;
+        }
         // While nothing has arrived, not while nothing is open. The session now opens by
         // itself, so tying the hint to that would take it away before it had been read.
         this.FindControl<TextBlock>("StripHint")!.IsVisible = _seen == 0;
@@ -2238,7 +2753,7 @@ public partial class MainWindow : Window
         {
             Text = Nothing,
             FontFamily = new FontFamily("Consolas,Menlo,monospace"),
-            FontSize = 16,
+            FontSize = 14,
         };
 
         private readonly TextBlock _range = new()
@@ -2255,13 +2770,27 @@ public partial class MainWindow : Window
 
         public Control Visual => _visual;
 
+        /// <remarks>
+        /// Centred rather than stretched. A WrapPanel hands every child in a row the height of
+        /// the tallest, and on the record step these sit beside gauges twice their size -- so
+        /// each figure was a short line of text at the top of a tall empty box.
+        /// </remarks>
         private readonly Border _visual = new()
         {
             Classes = { "readout" },
-            Margin = new Thickness(0, 0, 8, 8),
+            Margin = new Thickness(0, 0, 6, 0),
+            VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
         };
 
         public void Set(string value) => _value.Text = value;
+
+        /// <summary>Changes the caption, for a readout whose meaning depends on the session.</summary>
+        public void Relabel(string text)
+        {
+            if (_name is not null) _name.Text = text;
+        }
+
+        private TextBlock? _name;
 
         /// <summary>Shows a number, and widens the range it has been seen in.</summary>
         public void Saw(double value, string format = "F0")
@@ -2289,6 +2818,60 @@ public partial class MainWindow : Window
             _seen = false;
             _range.Text = "";
             _value.Text = Nothing;
+        }
+
+        /// <summary>The same figures as a table row: label, value, range, on one line.</summary>
+        /// <remarks>
+        /// A readout is a label and a number, and <see cref="Build"/> gives it the room of a
+        /// paragraph -- three stacked lines inside a bordered card, two to a row. That is the
+        /// right shape for the three figures on the record step and the wrong one for the five
+        /// on the pen step, where it was most of the reason that pane scrolled.
+        /// <para>
+        /// Same TextBlocks either way, so whatever feeds the readout does not care which shape
+        /// it was built in -- except the range, which a row leaves out entirely. A readout can
+        /// only be built once: the second call would move the same children into a second
+        /// parent and empty the first.
+        /// </para>
+        /// </remarks>
+        public Readout AsRow()
+        {
+            _value.FontSize = 13;
+
+            var grid = new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+                Margin = new Thickness(0, 0, 0, 3),
+            };
+
+            var name = new TextBlock
+            {
+                Text = label,
+                FontSize = 11,
+                Foreground = new SolidColorBrush(Color.Parse("#7A7A74")),
+                VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+            };
+
+            _name = name;
+
+            _value.TextAlignment = Avalonia.Media.TextAlignment.Right;
+
+            Grid.SetColumn(name, 0);
+            Grid.SetColumn(_value, 1);
+
+            grid.Children.Add(name);
+            grid.Children.Add(_value);
+
+            // No range. The pre-flight asks whether the pen is reporting, and a number that
+            // moves answers that; the low and the high are a description of a take, which is
+            // the record step's job. They were also sitting against the values, because the
+            // value column is right-aligned and the range began immediately after it.
+
+            _visual.Classes.Clear();
+            _visual.Padding = new Thickness(0);
+            _visual.Margin = new Thickness(0);
+            _visual.Child = grid;
+
+            return this;
         }
 
         public Readout Build()
