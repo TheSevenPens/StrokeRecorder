@@ -11,7 +11,7 @@ namespace StrokeFieldGuide.Recorder;
 /// <remarks>
 /// <para>
 /// The recorder could write a take and never read one, which made every screen after the
-/// record step unreachable without a tablet and a hand. Thirty-one recordings sit in
+/// record step unreachable without a tablet and a hand. Thirty-one recordings sat in
 /// <c>traces/</c> and none of them could be put in front of the analysis it was built for.
 /// </para>
 /// <para>
