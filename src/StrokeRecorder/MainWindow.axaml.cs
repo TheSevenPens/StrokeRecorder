@@ -239,7 +239,29 @@ public partial class MainWindow : Window
     private IPenSession? _countedFrom;
 
     /// <summary>When the space bar was last acted on, to tell a held key from two presses.</summary>
-    private long _lastSpace;
+    /// <summary>
+    /// Whether the space bar is being held down right now.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>A latch, not a time guard.</b> Holding a key produces a stream of key-down events
+    /// with no key-up between them, and the branch below that can arm had no suppression at
+    /// all: the first down stopped the take and the second armed a new one, which is the
+    /// "sometimes it stops and rearms" reported from the pad three times.
+    /// </para>
+    /// <para>
+    /// A time guard was tried and is the wrong instrument. It has to pick a number, and any
+    /// number is both too long -- swallowing a real second press somebody meant -- and too
+    /// short, because auto-repeat rates are a system setting. A latch asks the question that
+    /// actually matters: has this key been released since it was last acted on.
+    /// </para>
+    /// <para>
+    /// Cleared on release and on the window losing focus, because a key released while the
+    /// window is not in front never arrives, and a latch that stayed raised would leave the
+    /// space bar dead until it was pressed and released again.
+    /// </para>
+    /// </remarks>
+    private bool _spaceHeld;
 
     /// <summary>
     /// How much of the pen in the air to keep either side of a stroke, in microseconds.
@@ -469,6 +491,11 @@ public partial class MainWindow : Window
         // cost a take yet only because nobody has left the window mid-recording -- which is a
         // thing a person doing a long series of strokes will eventually do.
         Activated += (_, _) => _session?.OnActivated();
+
+        // A key released while this window is not in front never arrives here, so the latch
+        // would stay raised and the space bar would be dead until it was pressed and released
+        // again. The same reason the lab clears its hand-panning flag on deactivation.
+        Deactivated += (_, _) => _spaceHeld = false;
 
         _poll = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(PollMilliseconds) };
         _poll.Tick += (_, _) =>
@@ -2305,6 +2332,8 @@ public partial class MainWindow : Window
 
         if (FocusManager?.GetFocusedElement() is TextBox) return;
 
+        if (e.Key == Key.Space) _spaceHeld = false;
+
         if (_step == 3 && e.Key is Key.Space or Key.Escape) e.Handled = true;
     }
 
@@ -2321,69 +2350,32 @@ public partial class MainWindow : Window
         // shape for a key somebody presses while holding a pen they must not move: the key
         // repeats, the second press falls through to the arming branch, and the take that was
         // just stopped starts again. Reported from the pad as "sometimes it stops and rearms".
-        if (e.Key == Key.Escape && _step == 3
-            && _capture is Capture.Armed or Capture.Drawing or Capture.Between
-            && _take?.Gesture.ManyStrokes == true)
+        if (e.Key == Key.Escape && _step == 3)
         {
-            StopTake();
+            if (Keys.Escape(_take?.Gesture.ManyStrokes == true, _capture) == Command.Stop)
+            {
+                StopTake();
 
-            e.Handled = true;
+                e.Handled = true;
+            }
 
             return;
         }
 
         if (e.Key == Key.Space && _step == 3)
         {
-            // No debounce where the key can only stop. Stopping a stopped take does nothing,
-            // so a repeat is harmless -- and a time guard could swallow a real stop that
-            // happened to follow a previous press closely, which is worse than the thing it
-            // was guarding against. It remains below, on the branch that can still arm.
+            // What the key means is Keys.Space's to decide and this method's to carry out.
+            // Kept apart because the decision is where #72 lived, and a decision can be
+            // checked without a window, a tablet or a hand.
+            var wanted = Keys.Space(_spaceHeld, _gesture is { ManyStrokes: true }, _capture);
 
-            // On a many-stroke gesture the space bar can only ever stop. It cannot arm, and
-            // it cannot restart what it just stopped.
-            //
-            // Debouncing the auto-repeat was not enough, and the reason is that a toggle is
-            // the wrong thing here however carefully it is guarded: any second press starts a
-            // recording, and somebody who is not certain the first one registered will press
-            // again. Reported twice from the pad, the second time on a build that had already
-            // been "fixed".
-            //
-            // Nothing is lost by refusing. A many-stroke take is armed deliberately, before
-            // the pen is in position, and the button is the right place for that.
-            // Space is the toggle it always was: it starts a recording when none is running
-            // and stops the one that is.
-            //
-            // It was made stop-only for a while, to keep it from restarting a take it had just
-            // stopped. That removed the only way to start a recording without reaching for the
-            // screen, which is the thing this key exists to avoid -- and the restart was never
-            // its fault. Two other mechanisms were doing it: the key-up activating whichever
-            // button held focus, and the pen, still in contact, reaching the branch that starts
-            // a new take when somebody draws after finishing one. Both are fixed, so the toggle
-            // is safe again.
-            //
-            // Escape stays stop-only, for when stopping is the only thing wanted.
-            if (_gesture is { ManyStrokes: true })
+            _spaceHeld = true;
+
+            switch (wanted)
             {
-                if (_capture is Capture.Armed or Capture.Drawing or Capture.Between) StopTake();
-                else ArmTake();
-            }
-            else
-            {
-                // The toggle, for the six single-stroke gestures. Here a repeat can still
-                // start something, so the time guard earns its place.
-                var now = Environment.TickCount64;
-
-                if (now - _lastSpace < 400)
-                {
-                    e.Handled = true;
-
-                    return;
-                }
-
-                _lastSpace = now;
-
-                if (_capture is Capture.Armed) Discard();
-                else ArmTake();
+                case Command.Stop: StopTake(); break;
+                case Command.Arm: ArmTake(); break;
+                case Command.Discard: Discard(); break;
             }
 
             e.Handled = true;

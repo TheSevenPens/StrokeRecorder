@@ -260,17 +260,27 @@ public static class Findings
     /// </remarks>
     private static void Delivered(List<Finding> found, Take take)
     {
+        // Two separate questions, and only one of them needs the session's counters.
+        //
+        //   did this window keep everything it was handed?   its own numbers answer it
+        //   did the session hand over everything it got?     only the session can say
+        //
+        // They used to be one branch, and the first was inside the second: where the session
+        // could not be asked, this reported "saw N readings and kept all of them" without
+        // checking, and returned before the arithmetic that would have found otherwise.
+        // Given 100 routed and two stored, it said exactly that. An instrument may say it
+        // does not know; it may not say the data is whole when it has not looked.
+        Kept(found, take);
+
         if (take.Counted is not { } c)
         {
-            // Absent rather than zero. The session could not be asked, or was replaced while
-            // the take was open, and saying nothing is better than reporting a subtraction
-            // across two different counters.
             if (take.Routed > 0)
             {
                 found.Add(new(Tone.Plain, "The session could not say what it was given",
-                    $"This window saw {take.Routed} readings and kept all of them. The counts "
-                    + "beneath it are unavailable for this take, so nothing here can speak for "
-                    + "the layer below."));
+                    $"This window was handed {take.Routed} readings. The counts beneath it are "
+                    + "unavailable for this take -- the session could not be asked, or was "
+                    + "replaced while the take was open -- so nothing here can speak for the "
+                    + "layer below. What this window did with what it was handed is above."));
             }
 
             return;
@@ -290,18 +300,6 @@ public static class Findings
                       ? ". That accounts for all of them."
                       : $", which leaves {lost - c.OutsideRegion} unaccounted for.")));
 
-        var stored = take.Count + take.Aloft.Count + take.DroppedOffPad + take.AfterTheStop;
-
-        if (stored != take.Routed)
-        {
-            found.Add(new(Tone.Warn,
-                $"{take.Routed - stored} readings reached this window and are in none of its columns",
-                $"{take.Routed} were handed over; {take.Count} are in strokes, {take.Aloft.Count} "
-                + $"in the airborne record, {take.DroppedOffPad} were off the pad and "
-                + $"{take.AfterTheStop} arrived after the stop. The rest are unaccounted for, "
-                + "which is a fault in the recorder rather than anything about the pen."));
-        }
-
         if (take.Routed != c.Delivered)
         {
             found.Add(new(Tone.Warn,
@@ -309,6 +307,45 @@ public static class Findings
                 "These should be equal. They are counted either side of the same handover, so "
                 + "a difference is a fault in the recorder rather than anything about the pen."));
         }
+    }
+
+    /// <summary>
+    /// Whether every reading this window was handed is in one of its columns.
+    /// </summary>
+    /// <remarks>
+    /// Answerable from the take alone, so it is answered whatever the session could or could
+    /// not say. Every reading handed over has exactly one place it should have ended up: in a
+    /// stroke, in the airborne record, dropped for being off the pad, or arriving after the
+    /// stop. A reading in none of them is one this window lost.
+    /// </remarks>
+    private static void Kept(List<Finding> found, Take take)
+    {
+        if (take.Routed == 0) return;
+
+        var stored = take.Count + take.Aloft.Count + take.DroppedOffPad + take.AfterTheStop;
+
+        if (stored == take.Routed)
+        {
+            found.Add(new(Tone.Good,
+                $"Every one of {take.Routed} readings this window was handed is accounted for",
+                $"{take.Count} in strokes, {take.Aloft.Count} in the airborne record, "
+                + $"{take.DroppedOffPad} off the pad, {take.AfterTheStop} after the stop. "
+                + "Counted from this take alone, so it holds whether or not the session below "
+                + "could be asked what it was given."));
+
+            return;
+        }
+
+        var missing = take.Routed - stored;
+
+        found.Add(new(Tone.Warn,
+            missing > 0
+                ? $"{missing} readings reached this window and are in none of its columns"
+                : $"{-missing} more readings are stored than were handed over",
+            $"{take.Routed} were handed over; {take.Count} are in strokes, {take.Aloft.Count} "
+            + $"in the airborne record, {take.DroppedOffPad} were off the pad and "
+            + $"{take.AfterTheStop} arrived after the stop. That is a fault in the recorder "
+            + "rather than anything about the pen."));
     }
 
     /// <summary>

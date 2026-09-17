@@ -275,7 +275,14 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
     /// <summary>The transform the whole take was placed through. Frozen at the first contact.</summary>
     public InkTransform Placed => placed;
 
-    public DateTimeOffset At { get; } = DateTimeOffset.Now;
+    /// <summary>When this take was recorded.</summary>
+    /// <remarks>
+    /// Settable, so that reopening a recording keeps the day it was made. Read-only with a
+    /// <c>Now</c> default, a recording from last September reopened as one made today, and
+    /// saving it again wrote that over the only record of when it happened. A trace is
+    /// evidence and the date is part of it.
+    /// </remarks>
+    public DateTimeOffset At { get; init; } = DateTimeOffset.Now;
 
     /// <summary>
     /// How many polls contributed to this take.

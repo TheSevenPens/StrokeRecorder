@@ -74,6 +74,12 @@ public static class Reopen
 
             var take = new Take(gesture, api, full > 0 ? (int)full : 32767, Placement(root))
             {
+                // The day it was recorded, not the day it was reopened. Without this a
+                // recording from last September came back stamped today, and saving it
+                // again wrote that over the only record of when it happened.
+                At = DateTimeOffset.TryParse(Text(root, "recordedAt"), out var when)
+                    ? when
+                    : DateTimeOffset.Now,
                 Tablet = Text(root, "device", "tablet"),
                 Driver = Text(root, "device", "driver"),
                 Conventions = Text(root, "device", "conventions"),

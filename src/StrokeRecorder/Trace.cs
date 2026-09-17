@@ -94,12 +94,55 @@ public static class Trace
         + "not the pen falling silent. Readings that reached the application in the same poll "
         + "share an 'arrived' exactly.";
 
+    /// <summary>
+    /// Writes a take, and answers where it went.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Written beside the target and moved into place.</b> Straight into the target with
+    /// <c>File.Create</c>, an existing recording was truncated the instant the new one began
+    /// — so anything that went wrong part way through left neither file. A recording is
+    /// evidence somebody drew once and cannot draw again.
+    /// </para>
+    /// <para>
+    /// <b>A name already taken is not overwritten.</b> It gets a suffix and the caller is
+    /// told where the file actually went, which is why this returns a path rather than
+    /// nothing. Suggested names carry a timestamp to the second, so two takes in one second
+    /// collide — rare with a hand on the button and ordinary once saving is automatic.
+    /// </para>
+    /// </remarks>
     public static string Write(Take take, string folder, string name)
     {
         Directory.CreateDirectory(folder);
 
-        var path = Path.Combine(folder, name.EndsWith(".json") ? name : name + ".json");
+        var path = Free(folder, name.EndsWith(".json") ? name : name + ".json");
+        var partial = path + ".writing";
 
+        WriteTo(partial, take);
+
+        // Moved rather than copied, which is one filesystem operation: the file is either
+        // the old one or the whole new one, and never half of either.
+        File.Move(partial, path);
+
+        return path;
+    }
+
+    /// <summary>The first name in this folder that is not taken.</summary>
+    private static string Free(string folder, string name)
+    {
+        var stem = Path.GetFileNameWithoutExtension(name);
+        var path = Path.Combine(folder, name);
+
+        for (var next = 2; File.Exists(path); next++)
+        {
+            path = Path.Combine(folder, $"{stem}-{next}.json");
+        }
+
+        return path;
+    }
+
+    private static void WriteTo(string path, Take take)
+    {
         using var stream = File.Create(path);
         using var json = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
 
@@ -264,8 +307,6 @@ public static class Trace
 
         json.WriteEndObject();
         json.Flush();
-
-        return path;
     }
 
     /// <param name="start">
