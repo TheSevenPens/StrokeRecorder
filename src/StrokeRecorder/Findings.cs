@@ -1,3 +1,4 @@
+using StrokeFieldGuide.Strokes;
 using WinPenKit;
 
 namespace StrokeFieldGuide.Recorder;
@@ -40,6 +41,12 @@ public static class Findings
     {
         var found = new List<Finding>();
 
+        Delivered(found, take);
+        Status(found, take);
+
+        Series(found, take);
+        Landing(found, take);
+
         Backend(found, take);
         Batching(found, take);
         Pressure(found, take);
@@ -51,6 +58,211 @@ public static class Findings
         Named(found, take);
 
         return found;
+    }
+
+    /// <summary>
+    /// What the device's own status word did, where it reports one.
+    /// </summary>
+    /// <remarks>
+    /// Reported rather than interpreted. Bit 1 on Wintab is a queue overflow, which nothing
+    /// has ever read and which would look exactly like the device falling silent -- so if it
+    /// ever sets, that is the answer to a question two days of recording has not settled. Bit
+    /// 0 is documented as proximity and does not behave as the name suggests on this driver,
+    /// so what it actually does is shown rather than assumed.
+    /// </remarks>
+    private static void Status(List<Finding> found, Take take)
+    {
+        var all = take.Readings.Concat(take.Aloft).ToList();
+
+        if (all.Count == 0 || all.All(reading => reading.Status == 0)) return;
+
+        var overflow = all.Count(reading => (reading.Status & 0x0002) != 0);
+
+        if (overflow > 0)
+        {
+            found.Add(new(Tone.Warn, $"The device flagged a queue overflow on {overflow} readings",
+                "Bit 1 of the status word. Readings were dropped before this application could "
+                + "see them, which is the one thing that looks identical to the device going "
+                + "quiet. Anything measured here about gaps in reporting is suspect."));
+        }
+
+        // Every distinct value, because the useful thing is which bits move and when, and a
+        // summary that decided that in advance would answer only the question it assumed.
+        var seen = all.Select(reading => reading.Status).Distinct().Order().ToList();
+
+        found.Add(new(Tone.Plain,
+            $"The status word took {seen.Count} distinct value{(seen.Count == 1 ? "" : "s")}",
+            string.Join(", ", seen.Take(8).Select(v => $"0x{v:X4}"))
+            + (seen.Count > 8 ? ", …" : "")
+            + $". In contact it is {Bits(take.Readings)}; in the air {Bits(take.Aloft)}."));
+    }
+
+    private static string Bits(IEnumerable<Reading> readings)
+    {
+        var values = readings.Select(reading => reading.Status).Distinct().Take(4).ToList();
+
+        return values.Count == 0 ? "not recorded" : string.Join(" and ", values.Select(v => $"0x{v:X4}"));
+    }
+
+    /// <summary>
+    /// Whether the readings that never arrived were never sent, or were thrown away.
+    /// </summary>
+    /// <remarks>
+    /// First, because when it says something is wrong nothing below it can be trusted. It
+    /// answers the one question this window cannot answer about itself: the take reconciles
+    /// internally whatever happens, and that says nothing about readings the session never
+    /// handed over.
+    /// </remarks>
+    private static void Delivered(List<Finding> found, Take take)
+    {
+        if (take.Counted is not { } c) return;
+
+        var lost = c.FromDriver - c.Delivered;
+
+        found.Add(new(lost == 0 ? Tone.Good : Tone.Warn,
+            lost == 0
+                ? $"The session passed on every one of {c.FromDriver} packets"
+                : $"{lost} of {c.FromDriver} packets did not reach this window",
+            lost == 0
+                ? "Counted beneath the session's own filtering. So anything missing from this "
+                  + "recording was never sent by the driver, rather than discarded on the way."
+                : $"{c.OutsideRegion} were dropped for arriving outside the capture region"
+                  + (lost == c.OutsideRegion
+                      ? ". That accounts for all of them."
+                      : $", which leaves {lost - c.OutsideRegion} unaccounted for.")));
+
+        if (take.Routed != c.Delivered)
+        {
+            found.Add(new(Tone.Warn,
+                $"The session delivered {c.Delivered} points and this window saw {take.Routed}",
+                "These should be equal. They are counted either side of the same handover, so "
+                + "a difference is a fault in the recorder rather than anything about the pen."));
+        }
+    }
+
+    /// <summary>
+    /// How hard each stroke started, against how hard it went on.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Stated by the person holding the pen before it was measured: driving the pen at the
+    /// tablet quickly makes it land hard, so the first few milliseconds of a fast stroke read
+    /// much heavier than the rest, and it has consequences for what gets drawn. This reports
+    /// the numbers and stops there. Whether the spike is the hand, the nib, or the sensor is
+    /// not answerable from one take.
+    /// </para>
+    /// <para>
+    /// Compared against the stroke's own median rather than against a fixed figure, because
+    /// strokes are drawn at different weights on purpose and a landing is only heavy relative
+    /// to the stroke it begins.
+    /// </para>
+    /// </remarks>
+    private static void Landing(List<Finding> found, Take take)
+    {
+        var spikes = new List<double>();
+
+        foreach (var contact in take.Contacts)
+        {
+            if (contact.Count < 12) continue;
+
+            var start = contact.Readings[0].At;
+
+            var opening = contact.Readings
+                .Where(reading => reading.At - start <= 25_000)
+                .Select(reading => (double)reading.Pressure)
+                .ToList();
+
+            var rest = contact.Readings
+                .Where(reading => reading.At - start > 25_000)
+                .Select(reading => (double)reading.Pressure)
+                .Order()
+                .ToList();
+
+            if (opening.Count == 0 || rest.Count == 0) continue;
+
+            var median = rest[rest.Count / 2];
+
+            if (median <= 0) continue;
+
+            spikes.Add(opening.Max() / median);
+        }
+
+        if (spikes.Count == 0) return;
+
+        var worst = spikes.Max();
+
+        found.Add(new(worst >= 1.2 ? Tone.Warn : Tone.Plain,
+            $"The first 25 ms peaked at {worst * 100:F0}% of the stroke's own weight",
+            spikes.Count == 1
+                ? "One stroke measured. Against the median of everything after the first 25 "
+                  + "milliseconds."
+                : $"Across {spikes.Count} strokes, {spikes.Min() * 100:F0}% to "
+                  + $"{worst * 100:F0}%. Against each stroke's own median after the first 25 "
+                  + "milliseconds."));
+
+        var withApproach = take.Contacts.Count(contact => contact.Approach.Count > 0);
+
+        found.Add(new(Tone.Plain,
+            withApproach == 0
+                ? "No approach was captured"
+                : $"The pen in the air is kept for {withApproach} of {take.Strokes} strokes",
+            withApproach == 0
+                ? "Nothing was hovering over the pad before these strokes began, so there is "
+                  + "no record of how the pen arrived. A pen already resting on the tablet, "
+                  + "or out of range until it landed, gives this."
+                : "Up to a quarter of a second either side, at zero pressure, for position "
+                  + "and angles only. It is there so the landing can be read against how the "
+                  + "pen arrived rather than on its own."));
+    }
+
+    /// <summary>
+    /// What the take holds, where it holds more than one stroke.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// First, because on a many-stroke take it is the finding that tells a reader how to read
+    /// all the others: everything below this line pools every reading in the take, which is
+    /// the right thing for a distribution and the wrong thing for anything sequential.
+    /// </para>
+    /// <para>
+    /// The gaps are reported because they are the point of recording a series in one file. A
+    /// pen that was off the tablet for two seconds and one that was off it for eighty
+    /// milliseconds are not doing the same thing, and it is the sort of difference that is
+    /// gone for good if the strokes are saved separately.
+    /// </para>
+    /// </remarks>
+    private static void Series(List<Finding> found, Take take)
+    {
+        if (take.Strokes < 2) return;
+
+        var lengths = take.Contacts.Select(contact => contact.Count).ToList();
+
+        var gaps = new List<double>();
+
+        for (var each = 1; each < take.Contacts.Count; each++)
+        {
+            var before = take.Contacts[each - 1].Readings;
+            var after = take.Contacts[each].Readings;
+
+            if (before.Count == 0 || after.Count == 0) continue;
+
+            gaps.Add((after[0].At - before[^1].At) / 1000.0);
+        }
+
+        found.Add(new(Tone.Good,
+            $"{take.Strokes} strokes in one take, {take.Count} readings",
+            $"Shortest {lengths.Min()} readings, longest {lengths.Max()}. "
+            + (gaps.Count == 0
+                ? "No gap could be measured."
+                : $"The pen was off the tablet between them for {gaps.Min():F0} to "
+                  + $"{gaps.Max():F0} ms.")));
+
+        // Only the strokes are drawn and only the strokes are kept, so a reader looking at
+        // the numbers below should know they are pooled rather than sequential.
+        found.Add(new(Tone.Plain, "The findings below pool every stroke",
+            "Pressure, tilt and cadence are counted across the whole take. Anything about "
+            + "speed or direction has to be read per stroke, because two readings either "
+            + "side of a lift are not a movement."));
     }
 
     /// <summary>

@@ -16,8 +16,125 @@ public enum Capture
     /// <summary>The tip is down and readings are being kept.</summary>
     Drawing,
 
+    /// <summary>
+    /// The tip lifted, and the take is not over. The next contact starts another stroke.
+    /// </summary>
+    /// <remarks>
+    /// Only reachable on a gesture that asks for many strokes. Every other gesture treats the
+    /// lift as the end, which is what <see cref="Taken"/> is, and the difference between the
+    /// two states is the whole of what "keep recording" means here.
+    /// </remarks>
+    Between,
+
     /// <summary>The tip lifted. There is a stroke to look at.</summary>
     Taken,
+}
+
+/// <summary>
+/// One contact inside a take: tip down to tip up, and why it ended.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>This is what the file calls a stroke</b>, because that is what it is once it is
+/// finished. It is called a contact here because while the pen is down it is not finished
+/// yet, and <see cref="Strokes.Stroke"/> is the library's name for the finished form.
+/// </para>
+/// <para>
+/// A take used to be exactly one of these and the distinction did not need a name. It does
+/// now: a gesture that asks for many strokes produces one take holding several, and the
+/// boundaries between them are data -- what the hand did between two strokes is a question
+/// somebody will want to ask of these recordings.
+/// </para>
+/// </remarks>
+public sealed class Contact
+{
+    private readonly List<Reading> _readings = [];
+    private readonly List<Reading> _approach = [];
+    private readonly List<Reading> _departure = [];
+
+    public IReadOnlyList<Reading> Readings => _readings;
+
+    public int Count => _readings.Count;
+
+    /// <summary>
+    /// The pen in the air on the way down, for up to a quarter of a second before it landed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A tablet reports the pen while it hovers, and until now this window threw all of that
+    /// away. It is the only record of <b>how the pen arrived</b>: how fast it was travelling
+    /// and how it was held, in the moments before the pressure sensor had anything to say.
+    /// </para>
+    /// <para>
+    /// This exists to make one specific question answerable. A pen driven at the tablet
+    /// quickly lands hard, and the first few milliseconds of a fast stroke read much heavier
+    /// than the rest of it. Whether that spike is predictable from the approach -- and so
+    /// whether a renderer could do something about it -- cannot be asked of a recording that
+    /// begins at the moment of contact.
+    /// </para>
+    /// <para>
+    /// <b>Empty is the ordinary answer on this tablet, and it cannot be fixed here.</b> The
+    /// device stops reporting the hovering pen before a landing -- measured at 264 ms to 3.9
+    /// seconds across five takes -- and resumes within 4 ms of the lift. Counted at the point
+    /// the session receives them, the driver sent 1072 packets and delivered all 1072, so the
+    /// readings are not being discarded anywhere in software. They are never sent.
+    /// <para>
+    /// So this array exists to record an approach where one is reported, and to say plainly
+    /// that none was where it is not. <see cref="SinceLastSeen"/> carries how long the gap
+    /// was. Anything wanting to know how the pen arrived has to infer it.
+    /// </para>
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<Reading> Approach => _approach;
+
+    /// <summary>The pen in the air after the lift, for up to a quarter of a second.</summary>
+    /// <remarks>
+    /// The other end of the same question. A stroke's last readings fall away as the pen
+    /// leaves, and how quickly it left is not in them.
+    /// </remarks>
+    public IReadOnlyList<Reading> Departure => _departure;
+
+    /// <summary>Why this stroke ended, for a reader who has only the file.</summary>
+    public string EndedBy { get; set; } = "the pen lifted";
+
+    public void Add(Reading reading) => _readings.Add(reading);
+
+    /// <summary>
+    /// How long before this stroke landed the pen was last reported in the air, in
+    /// microseconds, or null if it was not reported at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The number that turns an empty <see cref="Approach"/> from a mystery into a fact. An
+    /// empty approach has two quite different causes -- the pen was out of range, or the
+    /// recorder failed to keep what it was given -- and without this they look identical in
+    /// the file. Three takes were recorded before anybody could say which had happened, and
+    /// the guess was wrong twice.
+    /// </para>
+    /// <para>
+    /// A large gap with an empty approach means the pen was gone and there was nothing to
+    /// keep. A <b>small</b> gap with an empty approach is a fault, and would be the thing to
+    /// go and look at.
+    /// </para>
+    /// </remarks>
+    public long? SinceLastSeen { get; private set; }
+
+    public void Approaching(IEnumerable<Reading> readings, long? sinceLastSeen)
+    {
+        _approach.Clear();
+        _approach.AddRange(readings);
+
+        SinceLastSeen = sinceLastSeen;
+    }
+
+    public void Departing(Reading reading) => _departure.Add(reading);
+
+    /// <summary>The readings as a stroke, for anything that draws one.</summary>
+    public Stroke? Stroke => _readings.Count == 0 ? null : new Stroke(_readings);
+
+    /// <summary>How long the tip was down, in milliseconds, from the pen's own clock.</summary>
+    public double Milliseconds =>
+        _readings.Count < 2 ? 0 : (_readings[^1].At - _readings[0].At) / 1000.0;
 }
 
 /// <summary>
@@ -42,7 +159,95 @@ public enum Capture
 /// </remarks>
 public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, InkTransform placed)
 {
-    private readonly List<Reading> _readings = [];
+    private readonly List<Contact> _contacts = [];
+    private readonly List<Reading> _aloft = [];
+
+    /// <summary>
+    /// Every reading taken while the tip was up, unfiltered, when the take was asked for them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Not evidence about a stroke and not meant to be. This exists because three takes in a
+    /// row came back with an empty approach and the file could not say why: the pen being out
+    /// of range and the recorder dropping what it was given produce exactly the same absence.
+    /// Keeping the lot, including the packets that mean the pen has left, is what lets
+    /// somebody look rather than infer.
+    /// </para>
+    /// <para>
+    /// Off by default because it is the only thing here that records what happens <b>between</b>
+    /// strokes at full rate, and a minute of hovering is more readings than the drawing.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<Reading> Aloft => _aloft;
+
+    /// <summary>Whether any airborne reading was kept, so an empty list is not ambiguous.</summary>
+    /// <remarks>
+    /// Set by the keeping rather than declared up front. The switch was read once, when the
+    /// take was armed, so turning it on after arming recorded nothing and the window said
+    /// "0 readings" over a clock showing four seconds. Whether to keep them is the caller's
+    /// decision on every reading; this only reports whether it ever said yes.
+    /// </remarks>
+    public bool KeepingAloft { get; private set; }
+
+    /// <summary>Keeps one airborne reading.</summary>
+    public void Keep(Reading reading)
+    {
+        _aloft.Add(reading);
+        KeepingAloft = true;
+    }
+
+    /// <summary>Keeps the ones that arrived before this take existed.</summary>
+    public void KeepAll(IEnumerable<Reading> readings)
+    {
+        var before = _aloft.Count;
+
+        _aloft.AddRange(readings);
+
+        if (_aloft.Count > before) KeepingAloft = true;
+    }
+
+    /// <summary>
+    /// The strokes in this take, in the order they were drawn. Never empty once drawing has
+    /// begun, and holding exactly one for every gesture but the many-stroke one.
+    /// </summary>
+    public IReadOnlyList<Contact> Contacts => _contacts;
+
+    /// <summary>
+    /// Every reading in the take, strokes run together.
+    /// </summary>
+    /// <remarks>
+    /// A flattened view rather than the storage, because most of what reads a take asks
+    /// distributional questions -- what pressures were seen, how far the pen leaned -- and
+    /// those do not care where one stroke ended and the next began.
+    /// <para>
+    /// <b>Anything sequence-sensitive should read <see cref="Contacts"/> instead.</b> Two
+    /// consecutive readings here can be a pen lift and a landing somewhere else entirely, and
+    /// a speed or a direction computed across that pair is a measurement of nothing.
+    /// </para>
+    /// </remarks>
+    public IReadOnlyList<Reading> Readings =>
+        [.. _contacts.SelectMany(contact => contact.Readings)];
+
+    public int Count => _contacts.Sum(contact => contact.Count);
+
+    /// <summary>How many strokes the take holds.</summary>
+    public int Strokes => _contacts.Count;
+
+    /// <summary>The stroke being drawn, or the last one drawn.</summary>
+    public Contact? Current => _contacts.Count == 0 ? null : _contacts[^1];
+
+    /// <summary>Opens another stroke. Called when the tip goes down.</summary>
+    public Contact Begin()
+    {
+        var contact = new Contact();
+
+        _contacts.Add(contact);
+
+        return contact;
+    }
+
+    /// <summary>Keeps a reading, on the stroke being drawn.</summary>
+    public void Add(Reading reading) => (Current ?? Begin()).Add(reading);
 
     public Gesture Gesture => gesture;
 
@@ -55,10 +260,6 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
     public InkTransform Placed => placed;
 
     public DateTimeOffset At { get; } = DateTimeOffset.Now;
-
-    public IReadOnlyList<Reading> Readings => _readings;
-
-    public int Count => _readings.Count;
 
     /// <summary>
     /// How many polls contributed to this take.
@@ -73,7 +274,88 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
 
     public void Polled() => Polls++;
 
+    /// <summary>
+    /// Readings that reached the recorder and were stored nowhere, counted by why.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// There is one path that drops a reading: the tip is down but the pen is not over the
+    /// pad, so the take cannot have it and the airborne record will not take it either. It
+    /// was invisible until it mattered, and then it mattered a great deal -- the airborne
+    /// record stops several hundred milliseconds before every landing and nobody could say
+    /// whether that was the device going quiet or this window throwing readings away.
+    /// </para>
+    /// <para>
+    /// A tally rather than the readings themselves. If it is non-zero the next question is
+    /// which ones, and that is what the airborne switch is for.
+    /// </para>
+    /// </remarks>
+    public int DroppedOffPad { get; private set; }
+
+    public void DroppedOne() => DroppedOffPad++;
+
+    /// <summary>Every reading the recorder was handed while this take was open.</summary>
+    public int Routed { get; private set; }
+
+    /// <summary>
+    /// The most recent reading of any kind, in contact or not, on the pen's own clock.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="Milliseconds"/>, which is the span of <b>contact</b> and is
+    /// what the file reports. This is what a clock on the wall should show while a take is
+    /// running: a many-stroke take is still recording between its strokes, and a clock that
+    /// froze the moment the tip lifted told somebody their recording had stopped when it had
+    /// not.
+    /// </remarks>
+    public long LastSeen { get; private set; }
+
+    /// <summary>The first reading of any kind, which on a many-stroke take is the arming.</summary>
+    public long? FirstSeen { get; private set; }
+
+    /// <summary>
+    /// What the session says it was given, taken when the take started and when it ended.
+    /// </summary>
+    /// <remarks>
+    /// The count the recorder cannot take for itself. Every take reconciles internally --
+    /// readings handed over equals contact plus airborne plus dropped -- and that says nothing
+    /// about readings that were never handed over. These come from beneath the session's own
+    /// filtering, so the difference between them and <see cref="Routed"/> is the session's
+    /// doing rather than this window's.
+    /// </remarks>
+    public (long FromDriver, long OutsideRegion, long Delivered)? Counted { get; set; }
+
+    public void Routing(long at)
+    {
+        Routed++;
+
+        FirstSeen ??= at;
+
+        if (at > LastSeen) LastSeen = at;
+    }
+
+    /// <summary>
+    /// How long the take has been running, in milliseconds, hover included.
+    /// </summary>
+    /// <remarks>
+    /// From the <b>first reading the take saw</b>, not the first contact. On a many-stroke
+    /// take that is the moment somebody armed it, which is when they think the recording
+    /// started and is therefore what a clock should agree with.
+    /// </remarks>
+    public double Running => FirstSeen is { } from ? (LastSeen - from) / 1000.0 : 0;
+
+    /// <summary>Whether anything at all was recorded: a stroke, or the pen in the air.</summary>
+    /// <remarks>
+    /// A take with no strokes is ordinarily nothing. It is <b>not</b> nothing when the
+    /// airborne switch is on: a recording of the pen hovering and never touching down is a
+    /// legitimate thing to want, and is exactly what was wanted the day this was written.
+    /// </remarks>
+    public bool Holds => Count > 0 || Aloft.Count > 0;
+
     /// <summary>Why the take ended, for a reader who has only the file.</summary>
+    /// <remarks>
+    /// The take's own ending, which is not the same as the last stroke's. A many-stroke take
+    /// ends because somebody stopped it; the stroke before that ended because the pen lifted.
+    /// </remarks>
     public string EndedBy { get; set; } = "the pen lifted";
 
     /// <summary>
@@ -97,26 +379,66 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
 
     public bool Named => Tablet.Length > 0 && Driver.Length > 0;
 
-    public void Add(Reading reading) => _readings.Add(reading);
-
     /// <summary>
-    /// How long the contact lasted, in milliseconds, from the pen's own clock.
+    /// How long the take lasted, in milliseconds, from the pen's own clock.
     /// </summary>
     /// <remarks>
     /// The pen's clock and not the recorder's: a reading arrives when the poll happens to run,
     /// which is up to a frame after the pen reported it, and a duration measured off arrivals
     /// is a duration measured off this application's scheduler.
     /// </remarks>
-    public double Milliseconds =>
-        _readings.Count < 2 ? 0 : (_readings[^1].At - _readings[0].At) / 1000.0;
+    /// <remarks>
+    /// <para>
+    /// End to end across the whole take, so on a many-stroke take this includes the time the
+    /// pen spent off the tablet between strokes. That is deliberate: it is the take's
+    /// duration, and the pauses are part of what was recorded.
+    /// </para>
+    /// </remarks>
+    public double Milliseconds
+    {
+        get
+        {
+            var first = _contacts.FirstOrDefault(contact => contact.Count > 0);
+            var last = _contacts.LastOrDefault(contact => contact.Count > 0);
 
-    /// <summary>The readings as a stroke, for anything that draws one.</summary>
-    public Stroke? Stroke => _readings.Count == 0 ? null : new Stroke(_readings);
+            return first is null || last is null
+                ? 0
+                : (last.Readings[^1].At - first.Readings[0].At) / 1000.0;
+        }
+    }
+
+    /// <summary>Every stroke in the take, for anything that draws them.</summary>
+    public IEnumerable<Stroke> Drawable =>
+        _contacts.Select(contact => contact.Stroke).OfType<Stroke>();
+
+    /// <summary>
+    /// The take as one stroke, where it holds exactly one.
+    /// </summary>
+    /// <remarks>
+    /// Null on a many-stroke take rather than the strokes run together, which would be a
+    /// stroke that travels between the lift and the landing and was never drawn.
+    /// </remarks>
+    public Stroke? Stroke => _contacts.Count == 1 ? _contacts[0].Stroke : null;
 
     /// <summary>
     /// What the recording is, in one line, for somebody who was not holding the pen.
     /// </summary>
-    public string Describe() =>
-        $"{Count} readings over {Milliseconds:F0} ms through {Api}, "
-        + $"full scale {FullScalePressure}";
+    public string Describe()
+    {
+        // A take with no strokes used to describe itself as "0 readings over 0 ms" beside a
+        // clock reading four seconds, because both numbers are about contact and nothing had
+        // touched down. What was actually recorded is the pen in the air, and that is what it
+        // should say.
+        var what = Strokes switch
+        {
+            0 when Aloft.Count > 0 => $"No strokes, {Aloft.Count} readings of the pen in the air",
+            0 => "Nothing",
+            1 => $"{Count} readings",
+            _ => $"{Strokes} strokes, {Count} readings",
+        };
+
+        var over = Strokes == 0 ? Running : Milliseconds;
+
+        return $"{what} over {over:F0} ms through {Api}, full scale {FullScalePressure}";
+    }
 }

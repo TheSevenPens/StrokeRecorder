@@ -6,6 +6,7 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Markup.Xaml;
 using Avalonia.Media;
+using WinPenKit.Diagnostics;
 using Avalonia.Threading;
 using SkiaSharp;
 using StrokeFieldGuide.Brushes;
@@ -130,6 +131,44 @@ public partial class MainWindow : Window
     private string _suggested = "";
     private Take? _take;
 
+    /// <summary>
+    /// The pen in the air, kept for a quarter of a second in case it lands.
+    /// </summary>
+    /// <remarks>
+    /// Held on the window rather than on the take, because the readings that matter most
+    /// arrive <b>before</b> the take exists: a take is created by the first contact, and the
+    /// approach to that contact is already over by then.
+    /// </remarks>
+    private readonly List<Reading> _hover = [];
+
+    /// <summary>
+    /// Airborne readings kept before a take exists, for the debugging option only.
+    /// </summary>
+    /// <remarks>
+    /// The same reason <see cref="_hover"/> lives here: a take is created by the first
+    /// contact, and what the pen did on the way to it is already over by then.
+    /// </remarks>
+    private readonly List<Reading> _aloft = [];
+
+    /// <summary>The session's own counts when the take was armed, to subtract from later.</summary>
+    private (long, long, long)? _armedAt;
+
+    /// <summary>
+    /// How much of the pen in the air to keep either side of a stroke, in microseconds.
+    /// </summary>
+    /// <remarks>
+    /// A quarter of a second, which at the 240 readings a second measured here is about sixty
+    /// readings at each end. Bounded by time rather than by a count, because the count is a
+    /// property of the device's report rate and the question is about the hand: what happened
+    /// in the last moment before the pen landed is the same question whatever rate it was
+    /// sampled at.
+    /// <para>
+    /// There can be many seconds between two strokes and almost none of it is interesting.
+    /// Keeping all of it would make the pauses larger in the file than the drawing.
+    /// </para>
+    /// </remarks>
+    private const long HoverKept = 250_000;
+
     private readonly Readout _took = new("readings");
     private readonly Readout _lasted = new("milliseconds");
     private readonly Readout _takePressure = new("pressure");
@@ -215,6 +254,10 @@ public partial class MainWindow : Window
 
         _pad = new PenPad(1200, 700);
         _pad.Grew += (_, _) => Regrown();
+
+        // The same treatment for the review pad, and for the same reason. Without it a stroke
+        // that landed past the pad's constructed size is gone before anybody sees the step.
+        _replay.Grew += (_, _) => { if (_step == 4) Replayed(); };
         this.FindControl<Panel>("PadHost")!.Children.Add(_pad);
 
         foreach (var readout in All)
@@ -265,7 +308,15 @@ public partial class MainWindow : Window
             this.FindControl<TextBox>(box)!.TextChanged += (_, _) => Named();
         }
 
-        this.FindControl<Button>("Arm")!.Click += (_, _) => ArmTake();
+        this.FindControl<Button>("Arm")!.Click += (_, _) =>
+        {
+            if (_capture is Capture.Armed or Capture.Drawing or Capture.Between
+                && _take?.Gesture.ManyStrokes == true)
+            {
+                StopTake();
+            }
+            else ArmTake();
+        };
         this.FindControl<Button>("Again")!.Click += (_, _) => Discard();
 
         this.FindControl<Button>("AgainSame")!.Click += (_, _) => RecordAnother(3);
@@ -342,7 +393,11 @@ public partial class MainWindow : Window
 
         // Arriving with a take already in hand leaves it alone: walking back to look at the
         // gesture and returning should not throw away the stroke that was just drawn.
-        if (step == 3 && _take is null) ArmTake();
+        // Auto-armed for the single-stroke gestures, where arming is friction nobody wanted.
+        // Not for a many-stroke one: there the arming is the start of the recording and
+        // starting it on somebody's behalf, before they are holding the pen, begins a
+        // recording of the room.
+        if (step == 3 && _take is null && _gesture is not { ManyStrokes: true }) ArmTake();
         else if (step == 3) Stage();
         else if (step == 4) Review();
         else if (step == 5) ToSave();
@@ -373,7 +428,7 @@ public partial class MainWindow : Window
         // A take with something in it. One reading counts, because a tap is one reading and
         // is a real recording -- refusing it would refuse the gesture that exists to show
         // what a press and a release report when nothing moves.
-        3 => _take is { Count: > 0 } && _capture == Capture.Taken,
+        3 => _take is { Holds: true } && _capture == Capture.Taken,
 
         // Nothing to answer. Review is for reading, and a reader who disagrees with what it
         // says goes back and draws again rather than arguing with this screen.
@@ -425,8 +480,15 @@ public partial class MainWindow : Window
             2 when _gesture is null => "Pick what you are going to draw.",
             2 => $"{_gesture!.Label}. Next is where you draw it.",
 
+            3 when _capture == Capture.Armed && _take?.Gesture.ManyStrokes == true =>
+                "Recording. Nothing has been drawn yet; the clock is running anyway.",
             3 when _capture == Capture.Armed => "Armed. Put the tip down and the take starts.",
+            3 when _capture == Capture.Idle && _gesture is { ManyStrokes: true } =>
+                "Press Arm to start recording. The clock runs from then, not from the first stroke.",
             3 when _take is null => $"{_gesture?.Label}. Arm, then draw.",
+            3 when _capture is Capture.Drawing or Capture.Between
+                && _take?.Gesture.ManyStrokes == true =>
+                $"{SoFar(_take)} so far. Stop ends the take; the space bar does the same.",
             3 when _capture == Capture.Drawing => "Recording. Lift the pen to finish.",
             3 when _capture == Capture.Taken =>
                 $"{_take!.Describe()}. Next reads it back to you.",
@@ -565,6 +627,26 @@ public partial class MainWindow : Window
     {
         var reading = Reported(point);
 
+        _take?.Routing(reading.At);
+
+        // The pen in the air. Kept whenever a take could be affected by it: before one starts,
+        // between its strokes, and for a moment after the last one -- and dropped the instant
+        // the tip goes down, because from there the stroke itself is the record.
+        if (!reading.InContact)
+        {
+            // Unfiltered and before anything else, because the whole point of the option is to
+            // see what the recorder is choosing to drop.
+            if (Keeping)
+            {
+                // Asked on every reading, not once when the take was armed. The switch is on
+                // the same screen as the recording and there is no reason somebody cannot
+                // reach for it halfway through.
+                if (_take is null) _aloft.Add(reading); else _take.Keep(reading);
+            }
+
+            if (Airborne(reading)) Hovering(reading);
+        }
+
         // Only over the pad. A tablet reports the pen wherever it is, so without this the tap
         // that presses Arm is itself recorded as a stroke -- it armed, took a two-reading
         // take from the same tap, and read as the button un-arming itself.
@@ -576,12 +658,31 @@ public partial class MainWindow : Window
         {
             if (_capture == Capture.Drawing)
             {
-                _take!.EndedBy = "the pen left the pad";
-                _capture = Capture.Taken;
+                _take!.Current!.EndedBy = "the pen left the pad";
+
+                // On a many-stroke take this ends the stroke and not the take. Wandering off
+                // the pad is the same event as a lift for the stroke being drawn, and the
+                // take is only over when somebody says it is.
+                if (_take.Gesture.ManyStrokes)
+                {
+                    _capture = Capture.Between;
+                }
+                else
+                {
+                    _take.EndedBy = "the pen left the pad";
+                    _capture = Capture.Taken;
+                }
+
                 _haveLast = false;
 
                 Stage();
             }
+
+            // Counted, because this is the one path that reaches here and stores nothing.
+            // An airborne reading was already kept above; a reading with the tip down that
+            // lands off the pad is dropped entirely, and until this tally existed there was
+            // no way to tell that from the device going quiet.
+            if (reading.InContact) _take?.DroppedOne();
 
             return;
         }
@@ -595,10 +696,17 @@ public partial class MainWindow : Window
         {
             // The transform is taken here, once, and every reading in this take is placed
             // through it. See Take for why it cannot be taken at save time.
-            _take = new Take(_gesture!, session.Api, session.MaxPressure, _pad.ForPen())
+            // Already made, if arming made it. A many-stroke take exists from the moment it
+            // was armed and the first contact adds a stroke to it rather than creating it.
+            _take ??= new Take(_gesture!, session.Api, session.MaxPressure, _pad.ForPen())
             {
                 Conventions = session.Conventions.ToString() ?? "",
             };
+            _take.KeepAll(_aloft);
+            _aloft.Clear();
+            var opening = Approaching(reading);
+            _take.Begin().Approaching(opening.Readings, opening.SinceLastSeen);
+
             _capture = Capture.Drawing;
             _haveLast = false;
         }
@@ -619,10 +727,27 @@ public partial class MainWindow : Window
             }
             else
             {
-                // The tip lifted, which is the end of the take and needs no button.
-                _capture = Capture.Taken;
+                // The tip lifted. For most gestures that is the end of the take and needs no
+                // button; for a many-stroke one it is the end of a stroke and nothing more.
+                _capture = _take!.Gesture.ManyStrokes ? Capture.Between : Capture.Taken;
                 _haveLast = false;
             }
+        }
+        else if (_capture == Capture.Between && reading.InContact)
+        {
+            // Another stroke in the same take. Nothing is cleared and nothing is reset: the
+            // pad keeps what is already on it, so the series accumulates into one picture,
+            // and the clock keeps running so the gap between the strokes stays measurable.
+            var next = _take!.Begin();
+
+            var coming = Approaching(reading);
+            next.Approaching(coming.Readings, coming.SinceLastSeen);
+            next.Add(reading);
+
+            Lay(_pad, point, session.MaxPressure, _take.Placed);
+
+            _capture = Capture.Drawing;
+            _haveLast = false;
         }
         else if (_capture == Capture.Taken && reading.InContact)
         {
@@ -633,7 +758,7 @@ public partial class MainWindow : Window
             // The previous take is held right up to this moment rather than thrown away when
             // the last one finished, so a take is only lost by starting another -- and a
             // reader who wants to keep it presses Next before putting the pen down.
-            Restart(session);
+            Restart(session, reading);
 
             _take!.Add(reading);
 
@@ -643,8 +768,103 @@ public partial class MainWindow : Window
         Stage();
     }
 
+    /// <summary>
+    /// Whether an airborne reading is the pen being somewhere, or the pen being gone.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A Wintab device stops reporting when the pen is lifted out of range, and the last
+    /// packet before it goes is not a measurement: the position repeats the one before it and
+    /// the orientation comes back as an altitude of 90 and an azimuth of 0 -- a pen standing
+    /// perfectly upright and aimed due north, at the moment there is no pen. Kept, that is a
+    /// false vertical at the end of every departure, in the one array whose purpose is to say
+    /// how the pen left.
+    /// </para>
+    /// <para>
+    /// <b>Recognised by what it is, and not by the session's proximity flag.</b> That was
+    /// tried first and is why this comment is long. <c>WintabDigitizerSession</c> declares
+    /// <c>PenCapabilities.Proximity</c> and fills <c>Status</c> from the packet's
+    /// <c>pkStatus</c>, so asking <c>IsInProximity</c> looks like the clean answer -- but on
+    /// this driver bit zero is not set on ordinary hover packets, so the guard rejected
+    /// <b>every</b> airborne reading and a whole recording came back with no approach and no
+    /// departure at all. The capability is declared; the bit does not mean what the property
+    /// assumes. Filed against WinPenKit rather than worked around there.
+    /// </para>
+    /// <para>
+    /// So all three of the artefact's marks are required together: no lean, no azimuth, and a
+    /// position identical to the reading before it. A real pen would have to be exactly
+    /// vertical, exactly north and exactly still to be dropped by this, and it would be one
+    /// hover reading. That is the limit, and it is worth stating rather than implying the test
+    /// is exact.
+    /// </para>
+    /// </remarks>
+    private bool Airborne(Reading reading) =>
+        reading.Lean != 0
+        || reading.Azimuth != 0
+        || _hover.Count == 0
+        || _hover[^1].X != reading.X
+        || _hover[^1].Y != reading.Y;
+
+    /// <summary>
+    /// Keeps one airborne reading, and forgets any that are now too old to matter.
+    /// </summary>
+    /// <remarks>
+    /// Also the other half of the departure: while the state is Between or Taken there is a
+    /// stroke that has just ended, and a reading arriving within the window belongs to it.
+    /// </remarks>
+    private void Hovering(Reading reading)
+    {
+        _hover.Add(reading);
+
+        // Trimmed against the newest reading rather than a wall clock, so this agrees with
+        // the timestamps the file will carry even if the polling falls behind.
+        while (_hover.Count > 0 && reading.At - _hover[0].At > HoverKept) _hover.RemoveAt(0);
+
+        if (_capture is not (Capture.Between or Capture.Taken)) return;
+
+        if (_take?.Current is not { Count: > 0 } just) return;
+
+        if (reading.At - just.Readings[^1].At <= HoverKept) just.Departing(reading);
+    }
+
+    /// <summary>
+    /// The airborne readings within the window before a landing, oldest first.
+    /// </summary>
+    /// <remarks>
+    /// Measured back from the landing itself rather than from the newest reading held, which
+    /// are not the same instant: the pen can hover a while and then be reported in contact
+    /// several milliseconds later, and the window a reader cares about ends where the stroke
+    /// begins.
+    /// </remarks>
+    private (IReadOnlyList<Reading> Readings, long? SinceLastSeen) Approaching(Reading landing)
+    {
+        var approach = _hover.Where(seen => landing.At - seen.At <= HoverKept).ToList();
+
+        // How long ago the pen was last reported in the air, whether or not any of it was
+        // inside the window. This is what says why an approach is empty, and an empty
+        // approach with no explanation is what three takes in a row produced.
+        var since = _hover.Count > 0 ? landing.At - _hover[^1].At : (long?)null;
+
+        // Strictly the window, and nothing older. An earlier version kept the most recent
+        // airborne reading however old it was, on the reasoning that a device reporting on
+        // change says nothing precisely when nothing has changed, so the last reading was
+        // still current. That reasoning was wrong: measured, the pen is moving at 134 to 255
+        // px/s at the moment reporting stops, so a reading from 383 ms earlier describes a
+        // pen that has since travelled an unknown distance.
+        //
+        // Why reporting stops is not yet known. Until it is, the honest thing is an empty
+        // approach and an accurate age beside it, rather than a stale reading in an array
+        // whose name says it describes the arrival.
+
+        // Cleared, so the next stroke in the take cannot be handed this one's approach. A
+        // stroke that lands with nothing in front of it should say so.
+        _hover.Clear();
+
+        return (approach, since);
+    }
+
     /// <summary>Begins a take where one has just finished, on the same gesture.</summary>
-    private void Restart(IPenSession session)
+    private void Restart(IPenSession session, Reading landing)
     {
         foreach (var readout in Taken) readout.Forget();
 
@@ -655,16 +875,97 @@ public partial class MainWindow : Window
         {
             Conventions = session.Conventions.ToString() ?? "",
         };
+        _take.KeepAll(_aloft);
+        _aloft.Clear();
+        var arriving = Approaching(landing);
+        _take.Begin().Approaching(arriving.Readings, arriving.SinceLastSeen);
 
         _capture = Capture.Drawing;
         _haveLast = false;
     }
 
+    /// <summary>
+    /// Ends a many-stroke take by hand, which is the only thing that can end one.
+    /// </summary>
+    /// <remarks>
+    /// The stroke being drawn is closed too, if the pen is still down when this is pressed.
+    /// Somebody who stops mid-stroke has told us the take is over; throwing away the readings
+    /// up to that moment would be a second decision they did not make.
+    /// </remarks>
+    /// <summary>What the session counted, where the backend can say.</summary>
+    /// <remarks>
+    /// A type test rather than an assumption: only the Wintab sessions implement it, and a
+    /// backend that cannot say should answer nothing rather than zero.
+    /// </remarks>
+    private static (long, long, long)? Counts(IPenSession? session) =>
+        session is IPacketCounts c ? (c.PacketsFromDriver, c.PacketsOutsideCaptureRegion, c.PointsDelivered) : null;
+
+    private void StopTake()
+    {
+        if (_take is null || _capture is not (Capture.Armed or Capture.Drawing or Capture.Between)) return;
+
+        _take.Counted = Counts(_session) is { } now && _armedAt is { } then
+            ? (now.Item1 - then.Item1, now.Item2 - then.Item2, now.Item3 - then.Item3)
+            : null;
+
+        if (_capture == Capture.Drawing && _take.Current is { } drawing)
+        {
+            drawing.EndedBy = "the recording was stopped mid-stroke";
+        }
+
+        _take.EndedBy = _take.Strokes == 0
+            ? "the recording was stopped before anything was drawn"
+            : "the recording was stopped";
+
+        _capture = Capture.Taken;
+        _haveLast = false;
+
+        Stage();
+    }
+
+    /// <summary>
+    /// Arms the recorder, and on a many-stroke gesture starts the take then and there.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For the six single-stroke gestures the take still begins at the first contact, which
+    /// is what they mean: one attempt at one stroke, and nothing before it is part of it.
+    /// </para>
+    /// <para>
+    /// A many-stroke take is different and was wrong. The recording is a <b>period</b>, not a
+    /// stroke, and a period somebody starts by pressing a button. Beginning at the first
+    /// contact meant the clock could not run until the pen touched down, there was nothing to
+    /// count readings against before then, and the pen in the air on the way to the first
+    /// stroke belonged to no take. Asked for from the pad: press Arm, and the recording is
+    /// running from that moment whether or not anything is being drawn.
+    /// </para>
+    /// </remarks>
     private void ArmTake()
     {
         _take = null;
         _capture = Capture.Armed;
         _haveLast = false;
+
+        if (_gesture is { ManyStrokes: true } && _session is { IsRunning: true } armed)
+        {
+            // The transform is frozen here rather than at the first contact. Take says why it
+            // cannot be taken at save time; arming happens on this step with the pad on screen
+            // and the window settled, which satisfies the same requirement and gives the whole
+            // series one transform instead of the first stroke's.
+            _take = new Take(_gesture, armed.Api, armed.MaxPressure, _pad.ForPen())
+            {
+                Conventions = armed.Conventions.ToString() ?? "",
+            };
+
+            _take.KeepAll(_aloft);
+
+            _armedAt = Counts(armed);
+        }
+
+        // Whatever the pen did before somebody pressed Arm is not the approach to the stroke
+        // they are about to draw.
+        _hover.Clear();
+        _aloft.Clear();
 
         foreach (var readout in Taken) readout.Forget();
 
@@ -701,6 +1002,9 @@ public partial class MainWindow : Window
         _take = null;
         _capture = Capture.Idle;
 
+        _hover.Clear();
+        _aloft.Clear();
+
         foreach (var readout in Taken) readout.Forget();
 
         _takeGauges.Forget();
@@ -729,8 +1033,15 @@ public partial class MainWindow : Window
     /// </remarks>
     private void Tick()
     {
-        var seconds = _capture is Capture.Drawing or Capture.Taken && _take is not null
-            ? _take.Milliseconds / 1000
+        // Between counts too, and the clock reads Running rather than Milliseconds. A
+        // many-stroke take is still recording while the pen is up, and Milliseconds is the
+        // span of contact -- so a clock built on it froze the instant the tip lifted and told
+        // somebody their recording had stopped when it had not. Reported by the person it
+        // told, who also asked whether the frozen clock and the missing hover data were the
+        // same fault. They are not: this one is the display reading the wrong number.
+        var seconds = _capture is Capture.Armed or Capture.Drawing or Capture.Between or Capture.Taken
+            && _take is not null
+            ? _take.Running / 1000
             : 0;
 
         this.FindControl<TextBlock>("Clock")!.Text = $"{seconds:F2} s";
@@ -751,18 +1062,38 @@ public partial class MainWindow : Window
         _ => null,
     };
 
+    /// <summary>Whether the window was asked to keep every airborne reading.</summary>
+    private bool Keeping => this.FindControl<CheckBox>("KeepAloft")?.IsChecked == true;
+
+    /// <summary>How much is in the take so far, in words rather than a bare number.</summary>
+    private static string SoFar(Take? take) => take is null
+        ? "Nothing"
+        : take.Strokes == 1 ? "One stroke" : $"{take.Strokes} strokes";
+
     /// <summary>Puts the words and the buttons where the take has got to.</summary>
     private void Stage()
     {
         var (title, state) = _capture switch
         {
+            Capture.Idle when _gesture is { ManyStrokes: true } => ("Ready when you are",
+                "Not recording. Press Arm to start, and everything from that moment is part of "
+                + "the take -- the pen in the air as well as the strokes."),
             Capture.Idle => ("Draw when you are ready",
                 "Not armed. Press Arm, and the recording starts the moment the tip touches down."),
+            Capture.Armed when _take?.Gesture.ManyStrokes == true => ("Recording",
+                "Recording from the moment you armed it, whether or not you are drawing. The "
+                + "clock is running. Draw when you are ready, and press Stop when the series "
+                + "is finished."),
             Capture.Armed => ("Draw when you are ready",
                 "Armed. Waiting for the tip."),
+            Capture.Drawing when _take?.Gesture.ManyStrokes == true => ("Drawing",
+                $"Stroke {_take.Strokes}. Lift and draw again; press Stop when the series is "
+                + "finished."),
             Capture.Drawing => ("Drawing",
                 "Recording. Lift the pen when the stroke is finished."),
-            _ => (_take is null or { Count: 0 } ? "Nothing taken" : "Taken",
+            Capture.Between => ("Between strokes",
+                $"{SoFar(_take)} kept, and still recording. Draw the next one, or press Stop."),
+            _ => (_take is null or { Holds: false } ? "Nothing taken" : "Taken",
                   _take is null ? "" : _take.Describe()),
         };
 
@@ -771,18 +1102,50 @@ public partial class MainWindow : Window
 
         this.FindControl<TextBlock>("TakeBrief")!.Text = _gesture?.Detail ?? "";
 
+        // How a take ends is not the same sentence for every gesture, and it used to be
+        // written into the XAML as though it were. A gesture that keeps recording across
+        // lifts makes the old wording exactly wrong: it says there is nothing to press, on
+        // the one screen where something has to be.
+        this.FindControl<TextBlock>("HowItEnds")!.Text = _gesture?.ManyStrokes == true
+            ? "Press Arm to start. From that moment the recording is running -- the clock, the "
+              + "pen in the air, and every stroke you draw -- and it keeps going across pen "
+              + "lifts, so the whole series lands in one file with the gaps intact. Press "
+              + "Stop, or the space bar, when the series is finished."
+            : "The recording starts when the tip touches down and ends when it lifts, so "
+              + "there is nothing to press at either end. The guide on the pad is there to "
+              + "follow and is not part of what is recorded.";
+
         this.FindControl<TextBlock>("TakeDetail")!.Text = _capture switch
         {
+            Capture.Taken when _take is { Strokes: 0, Aloft.Count: > 0 } =>
+                $"No strokes, and {_take.Aloft.Count} readings of the pen in the air. That is a "
+                + "recording of the hovering pen, which is a thing worth having on purpose.",
+            Capture.Taken when _take is { Strokes: 0, Routed: > 0 } =>
+                $"Nothing was drawn. The pen reported {_take.Routed} readings while this was "
+                + "recording, and none of them were kept -- switch on \"keep every airborne "
+                + "reading\" before arming if the hovering pen is what you are after.",
             Capture.Taken when _take is null or { Count: 0 } =>
                 "Nothing was captured. Did the pen reach the pad?",
             Capture.Taken when _take is { Count: 1 } =>
                 "One reading only. That is a tap, and is a finished take if a tap is what "
                 + "was wanted.",
             Capture.Taken => $"Ended because {_take!.EndedBy}.",
+            Capture.Between => "The pen is off the tablet and the clock is still running. "
+                + "The gap is kept, because what a hand does between two strokes is part of "
+                + "what this is recording.",
             _ => "",
         };
 
-        this.FindControl<Button>("Arm")!.IsEnabled = _capture is Capture.Idle or Capture.Taken;
+        // One button, two jobs, because they are never both available: a take that can be
+        // stopped is a take that is already running, and a take that can be armed is not.
+        var stopping = _capture is Capture.Armed or Capture.Drawing or Capture.Between
+            && _take?.Gesture.ManyStrokes == true;
+
+        var arm = this.FindControl<Button>("Arm")!;
+
+        arm.Content = stopping ? "Stop" : "Arm";
+        arm.IsEnabled = stopping || _capture is Capture.Idle or Capture.Taken;
+
         this.FindControl<Button>("Again")!.IsEnabled = _capture is Capture.Taken;
 
         Tick();
@@ -817,11 +1180,14 @@ public partial class MainWindow : Window
 
         DrawGuide();
 
-        if (_take?.Stroke is not { } stroke) return;
+        if (_take is null) return;
 
         var brush = Brush(_take.FullScalePressure);
 
-        brush.Draw(_pad.Surface, _take.Placed, stroke);
+        // Every stroke in the take, not just one. A many-stroke take is a series and the
+        // picture of it is the series; drawing only the last would show a pad that had lost
+        // the recording it is still making.
+        foreach (var stroke in _take.Drawable) brush.Draw(_pad.Surface, _take.Placed, stroke);
 
         _pad.Redraw();
     }
@@ -888,24 +1254,69 @@ public partial class MainWindow : Window
     /// and a take redrawn from its own readings is the first thing that would go wrong if the
     /// readings were not what was drawn.
     /// </remarks>
-    private void Review()
+    /// <summary>
+    /// Draws the take onto the review pad, from its readings.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Separate from <see cref="Review"/> because it has to be able to run twice. This pad
+    /// starts at its constructed size and grows to its box when the step is laid out, and the
+    /// first draw can happen before that: a stroke placed beyond the small surface is not
+    /// clipped for display, it is <b>dropped</b>, and growing afterwards cannot bring it back
+    /// because there is nothing left to copy.
+    /// </para>
+    /// <para>
+    /// It went unnoticed while a take was one stroke, because one stroke rarely reaches the
+    /// bottom of the pad. A series spreads down it, and the last stroke of three landed one
+    /// surface row short of the edge and vanished -- with the findings beside it correctly
+    /// reporting three.
+    /// </para>
+    /// </remarks>
+    private void Replayed()
     {
         _replay.Clear();
 
-        if (_take?.Stroke is { } stroke)
+        if (_take is null) return;
+
+        var brush = Brush(_take.FullScalePressure);
+
+        // Through the transform the take was placed with, not through this pad's own. The
+        // take is a finished thing and is replayed as it was drawn, whatever has happened to
+        // the window since.
+        foreach (var stroke in _take.Drawable)
         {
-            var brush = Brush(_take.FullScalePressure);
-
-            // Through the transform the take was placed with, not through this pad's own.
-            // The take is a finished thing and is replayed as it was drawn, whatever has
-            // happened to the window since.
             brush.Draw(_replay.Surface, _take.Placed, stroke);
-
-            _replay.Redraw();
         }
+
+        _replay.Redraw();
+    }
+
+    private void Review()
+    {
+        Replayed();
 
         var list = this.FindControl<StackPanel>("FindingList")!;
         list.Children.Clear();
+
+        if (_take is { Strokes: 0, Aloft.Count: > 0 } aloft)
+        {
+            list.Children.Add(Said(new Finding(Tone.Good,
+                $"{aloft.Aloft.Count} readings of the pen in the air, and no strokes",
+                $"Over {aloft.Running:F0} ms. A recording of the hovering pen, which is a "
+                + "thing worth having on purpose: it says what the tablet reports when "
+                + "nothing is being drawn.")));
+
+            list.Children.Add(Said(new Finding(Tone.Plain,
+                $"The pen reported {1000 * aloft.Aloft.Count / Math.Max(1, aloft.Running):F0} "
+                + "readings a second while hovering",
+                "Against the rate in contact, which the device conventions page puts at 240 "
+                + "on this tablet. The same rate means hovering is reported like drawing.")));
+
+            Named();
+            Refresh();
+
+            return;
+        }
 
         if (_take is null or { Count: 0 })
         {
@@ -1056,7 +1467,11 @@ public partial class MainWindow : Window
 
         this.FindControl<TextBlock>("Preview")!.Text = Headline(_take);
 
-        this.FindControl<Button>("Save")!.IsEnabled = _take is { Count: > 0 };
+        // Holds rather than Count, so a take of nothing but the hovering pen can be kept. It
+        // is a recording of what the tablet does when nobody is drawing, and that is a
+        // question this corpus has spent a morning failing to answer from takes that were
+        // about something else.
+        this.FindControl<Button>("Save")!.IsEnabled = _take is { Holds: true };
 
         Foot();
     }
@@ -1089,12 +1504,19 @@ public partial class MainWindow : Window
            origin           {take.Placed.OriginX:F3}, {take.Placed.OriginY:F3}
 
          columns            {string.Join(", ", Trace.Columns)}
+         strokes            {take.Strokes}{Spread(take)}
          readings           {take.Count} over {take.Milliseconds:F0} ms, {take.Polls} polls
          """;
 
+    /// <summary>The shortest and longest stroke, where there is more than one to compare.</summary>
+    private static string Spread(Take take) => take.Strokes < 2
+        ? ""
+        : $"  ({take.Contacts.Min(contact => contact.Count)} to "
+          + $"{take.Contacts.Max(contact => contact.Count)} readings each)";
+
     private void Keep()
     {
-        if (_take is null or { Count: 0 }) return;
+        if (_take is null or { Holds: false }) return;
 
         Named();
 
@@ -1164,7 +1586,15 @@ public partial class MainWindow : Window
         // a canvas holds the space bar for hand-panning and would mark it handled.
         if (e.Key == Key.Space && _step == 3)
         {
-            if (_capture is Capture.Armed) Discard();
+            // On a many-stroke take the same key stops it. The pen is in the hand and the
+            // take may have been running for a minute; reaching for a button with the other
+            // hand is the one moment this window would make somebody look away from the pad.
+            if (_capture is Capture.Armed or Capture.Drawing or Capture.Between
+                && _take?.Gesture.ManyStrokes == true)
+            {
+                StopTake();
+            }
+            else if (_capture is Capture.Armed) Discard();
             else ArmTake();
 
             e.Handled = true;
@@ -1429,6 +1859,19 @@ public partial class MainWindow : Window
             // Altitude counts up from the tablet and a lean counts away from vertical, so
             // one is the other subtracted from a right angle. Azimuth and twist come across
             // untouched: both are already the angle the guide wants.
+            // Wintab's pkZ. Kept because of what it explains rather than what it draws: the
+            // airborne record stops for seconds at a time while the pen sits perfectly still
+            // in every column recorded here, and resumes 4 ms after it moves. The driver is
+            // asked for a packet on any change (lcMoveMask is PK.ALL), so something it can
+            // see must be changing during the hover that is invisible in x, y, lean, azimuth
+            // and twist. Height is the obvious candidate and was not being kept.
+            Height: point.Z,
+
+            // Raw. Two open questions live in these bits: whether a Wintab queue overflow is
+            // what makes the airborne record stop before a stroke, which bit 1 would say and
+            // which nothing has ever read; and what bit 0 actually means, since asking
+            // IsInProximity for it rejected every hovering reading on this driver.
+            Status: point.Status,
             Lean: 90 - point.Altitude, Azimuth: point.Azimuth, Twist: point.Twist);
 
     private void Wipe()

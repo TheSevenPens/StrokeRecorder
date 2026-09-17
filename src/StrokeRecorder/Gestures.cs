@@ -44,6 +44,16 @@ public abstract record Guide
 /// the one shape in the set that does not mean what it looks like.
 /// </param>
 /// <param name="Shape">What to put on the strip to draw along, if anything.</param>
+/// <param name="ManyStrokes">
+/// Whether the take keeps going when the pen lifts.
+/// <para>
+/// False for everything that asks for one stroke, where the lift is the obvious and
+/// buttonless end of the recording. True where the thing being recorded is a <b>series</b> --
+/// the same stroke drawn faster and faster, or somebody simply drawing for a while -- and the
+/// lifts in the middle are part of it rather than the end of it. Such a take is ended by
+/// hand, because nothing else can tell the last lift from the others.
+/// </para>
+/// </param>
 public sealed record Gesture(
     string Id,
     string Label,
@@ -52,11 +62,12 @@ public sealed record Gesture(
     string Intent,
     string Thumb,
     Guide? Shape,
-    bool Filled = false);
+    bool Filled = false,
+    bool ManyStrokes = false);
 
 /// <summary>
-/// The six gestures this tool offers, carried over from the browser recorder this one is
-/// modelled on.
+/// The gestures this tool offers: six carried over from the browser recorder this one is
+/// modelled on, and one that recording with the first six showed was missing.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -116,6 +127,17 @@ public static class Gestures
             "M12 29 L78 22 L78 38 L12 31 Z",
             new Guide.Line(0.1, 0.5, 0.9, 0.5),
             Filled: true),
+
+        new("multi-stroke", "Multi-stroke drawing",
+            "Keeps recording across pen lifts. Draw the whole series, then press Stop. Say "
+            + "what you were varying when you name it.",
+            "What a hand does across a series rather than within one stroke: how a stroke "
+            + "starts, how it ends, and what changes from one to the next when something is "
+            + "being varied on purpose.",
+            "A series of strokes recorded as one take, with the pen lifting between them.",
+            "M10 40 C18 20 26 20 34 40 M40 38 C46 16 52 16 58 38 M64 36 C68 14 72 14 76 36",
+            null,
+            ManyStrokes: true),
 
         new("freeform", "Freeform",
             "No guide. Draw whatever the trace is for, and describe it yourself at the end.",

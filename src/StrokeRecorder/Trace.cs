@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using StrokeFieldGuide.Strokes;
 
 namespace StrokeFieldGuide.Recorder;
 
@@ -24,7 +25,45 @@ namespace StrokeFieldGuide.Recorder;
 public static class Trace
 {
     public const string Format = "stroke-field-guide/take";
-    public const int Version = 1;
+
+    /// <summary>
+    /// Four, since readings gained the device's own status word.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Version four adds a <c>status</c> column, raw and undecoded. On Wintab it is
+    /// <c>pkStatus</c>, and it is kept because two open questions are questions about what
+    /// its bits mean -- a queue overflow nothing has ever checked, and a proximity bit that
+    /// does not behave as its name suggests.
+    /// </para>
+    /// <remarks>
+    /// <para>
+    /// Version three adds a <c>height</c> column, from Wintab's <c>pkZ</c>. The columns are
+    /// declared in the file, so a reader that takes them from there rather than counting
+    /// positions needs no change; one that assumed seven does.
+    /// </para>
+    /// <remarks>
+    /// <para>
+    /// Version one put a single <c>readings</c> array at the top level, because a take was a
+    /// single stroke and nothing else was imaginable. Version two replaces it with
+    /// <c>strokes</c>, an array of objects each holding their own <c>readings</c> -- so a
+    /// one-stroke take is an array of one rather than a special case, and there is one shape
+    /// to read instead of two.
+    /// </para>
+    /// <para>
+    /// Each stroke may also carry <c>approach</c> and <c>departure</c> -- the pen in the air
+    /// for up to a quarter of a second either side of it, in the same columns and on the same
+    /// clock. Both are absent where there is nothing to report, which is an ordinary answer
+    /// rather than a fault: a pen already resting on the tablet has no approach.
+    /// </para>
+    /// <para>
+    /// The twelve version-one traces already recorded are <b>left as they are</b>. They are
+    /// evidence, they are cited by number in the notes, and rewriting them to tidy the format
+    /// would churn the corpus without adding a reading. Anything reading these files takes
+    /// both shapes: a top-level <c>readings</c> is a take of one stroke.
+    /// </para>
+    /// </remarks>
+    public const int Version = 4;
 
     /// <summary>What goes in, in order, so a reader does not have to guess at the tuples.</summary>
     /// <remarks>
@@ -33,7 +72,7 @@ public static class Trace
     /// once.
     /// </remarks>
     public static readonly string[] Columns =
-        ["at", "x", "y", "pressure", "lean", "azimuth", "twist"];
+        ["at", "x", "y", "pressure", "height", "status", "lean", "azimuth", "twist"];
 
     public static string Write(Take take, string folder, string name)
     {
@@ -53,6 +92,23 @@ public static class Trace
         json.WriteString("intent", take.Intent);
         json.WriteString("recordedAt", take.At.ToString("O"));
         json.WriteString("endedBy", take.EndedBy);
+        json.WriteNumber("strokeCount", take.Strokes);
+        json.WriteBoolean("keptEveryAirborneReading", take.KeepingAloft);
+        json.WriteNumber("readingsHandedToTheRecorder", take.Routed);
+        json.WriteNumber("readingsDroppedForBeingOffThePad", take.DroppedOffPad);
+
+        // From beneath the session's own filtering, where the backend can say. The difference
+        // between what the driver delivered and what the session passed on is the one number
+        // this window cannot work out for itself, and is the difference between "the tablet
+        // stopped reporting" and "the library discarded it".
+        if (take.Counted is { } counted)
+        {
+            json.WriteStartObject("whatTheSessionCounted");
+            json.WriteNumber("packetsFromTheDriver", counted.FromDriver);
+            json.WriteNumber("packetsOutsideTheCaptureRegion", counted.OutsideRegion);
+            json.WriteNumber("pointsDelivered", counted.Delivered);
+            json.WriteEndObject();
+        }
 
         json.WriteStartObject("device");
         json.WriteString("tablet", take.Tablet);
@@ -81,12 +137,79 @@ public static class Trace
         foreach (var column in Columns) json.WriteStringValue(column);
         json.WriteEndArray();
 
-        // Written as raw text, one reading to a line. An indenting writer puts every number
-        // on its own line, which for a four-second stroke at two hundred readings a second is
-        // some seven thousand lines of one integer each -- a file nobody scrolls through and
-        // a diff nobody reads. The header above stays indented, because that part is read.
-        json.WritePropertyName("readings");
-        json.WriteRawValue(Rows(take), skipInputValidation: true);
+        // Every timestamp in the file is relative to this one, across all the strokes rather
+        // than per stroke. That is what keeps the gaps between them measurable: a stroke
+        // whose readings started at its own zero would say how long it took and lose how long
+        // the pen had been off the tablet before it, which is exactly what a series is for.
+        // The first contact, or -- on a take that never touched down -- the first reading of
+        // the pen in the air. Without the fallback a hover-only take writes absolute device
+        // ticks, which have no stated origin and are meaningless on their own.
+        var start = take.Count > 0
+            ? take.Readings[0].At
+            : take.Aloft.Count > 0 ? take.Aloft[0].At : 0;
+
+        json.WriteStartArray("strokes");
+
+        foreach (var contact in take.Contacts)
+        {
+            json.WriteStartObject();
+            json.WriteString("endedBy", contact.EndedBy);
+            json.WriteNumber("readingCount", contact.Count);
+
+            // Why an approach is empty, where it is. Written whether or not there is one,
+            // because the number is the answer either way: a large gap means the pen had left
+            // range and there was nothing to keep, a small one with no approach is a fault.
+            if (contact.SinceLastSeen is { } since)
+            {
+                json.WriteNumber("lastSeenInTheAirMs", Math.Round(since / 1000.0, 1));
+            }
+            else
+            {
+                json.WriteString("lastSeenInTheAir", "the pen was not reported in the air at all");
+            }
+
+            // The pen in the air either side of the stroke, in the same columns and on the
+            // same clock as the readings. Their pressure is zero by definition -- they are
+            // kept for the position and the angles, which are the only record of how the pen
+            // arrived and how it left.
+            if (contact.Approach.Count > 0)
+            {
+                json.WritePropertyName("approach");
+                json.WriteRawValue(Rows(contact.Approach, start), skipInputValidation: true);
+            }
+
+            if (contact.Departure.Count > 0)
+            {
+                json.WritePropertyName("departure");
+                json.WriteRawValue(Rows(contact.Departure, start), skipInputValidation: true);
+            }
+
+            // Written as raw text, one reading to a line. An indenting writer puts every
+            // number on its own line, which for a four-second stroke at two hundred readings
+            // a second is some seven thousand lines of one integer each -- a file nobody
+            // scrolls through and a diff nobody reads. The header stays indented, because
+            // that part is read.
+            json.WritePropertyName("readings");
+            json.WriteRawValue(Rows(contact.Readings, start), skipInputValidation: true);
+
+            json.WriteEndObject();
+        }
+
+        json.WriteEndArray();
+
+        // Everything the pen reported with the tip up, unfiltered, when the take was asked for
+        // it. At the take's level rather than a stroke's, because most of it belongs to the
+        // gaps between strokes and not to either side of them.
+        if (take.KeepingAloft)
+        {
+            json.WriteString("aloftNote",
+                "Every reading taken with the tip up, unfiltered, including the packets that "
+                + "mean the pen has left range. Recorded to see what the recorder is choosing "
+                + "to drop. Not evidence about a stroke.");
+
+            json.WritePropertyName("aloft");
+            json.WriteRawValue(Rows(take.Aloft, start), skipInputValidation: true);
+        }
 
         json.WriteEndObject();
         json.Flush();
@@ -94,33 +217,37 @@ public static class Trace
         return path;
     }
 
-    private static string Rows(Take take)
+    /// <param name="start">
+    /// The take's first reading, which every timestamp in the file is measured from. Passed in
+    /// rather than taken per stroke, because a pen's timestamp has no stated origin: a
+    /// difference between two of them is meaningful and one on its own is not, and the
+    /// differences worth keeping include the ones that span a pen lift.
+    /// </param>
+    private static string Rows(IReadOnlyList<Reading> readings, long start)
     {
-        if (take.Readings.Count == 0) return "[]";
-
-        // Relative to the first, because a pen's timestamp has no stated origin. A difference
-        // between two of them is meaningful and one of them on its own is not.
-        var start = take.Readings[0].At;
+        if (readings.Count == 0) return "[]";
 
         var rows = new StringBuilder();
         rows.AppendLine("[");
 
-        for (var each = 0; each < take.Readings.Count; each++)
+        for (var each = 0; each < readings.Count; each++)
         {
-            var reading = take.Readings[each];
+            var reading = readings[each];
 
-            rows.Append("    [")
+            rows.Append("        [")
                 .Append(reading.At - start).Append(", ")
                 .Append(Round(reading.X, 3)).Append(", ")
                 .Append(Round(reading.Y, 3)).Append(", ")
                 .Append(reading.Pressure).Append(", ")
+                .Append(Round(reading.Height, 2)).Append(", ")
+                .Append(reading.Status).Append(", ")
                 .Append(Round(reading.Lean, 2)).Append(", ")
                 .Append(Round(reading.Azimuth, 2)).Append(", ")
                 .Append(Round(reading.Twist, 2))
-                .AppendLine(each == take.Readings.Count - 1 ? "]" : "],");
+                .AppendLine(each == readings.Count - 1 ? "]" : "],");
         }
 
-        return rows.Append("  ]").ToString();
+        return rows.Append("      ]").ToString();
     }
 
     /// <summary>Invariant, because a file read on a machine with another decimal point is not a file.</summary>

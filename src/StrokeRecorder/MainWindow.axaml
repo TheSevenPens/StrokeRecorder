@@ -321,7 +321,36 @@
           <TextBlock Name="TakeBrief" Classes="lede" />
 
           <TextBlock Classes="lede" FontSize="12"
-                     Text="The recording starts when the tip touches down and ends when it lifts, so there is nothing to press at either end. The guide on the pad is there to follow and is not part of what is recorded." />
+                     Name="HowItEnds" />
+
+          <Border Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
+                  CornerRadius="4" Padding="12,8">
+            <StackPanel Spacing="2">
+              <TextBlock Name="Clock" Text="0.00 s" FontSize="30" FontWeight="SemiBold"
+                         FontFamily="Consolas,Menlo,monospace" />
+              <TextBlock Name="Wanted" Classes="label" Text="" />
+            </StackPanel>
+          </Border>
+
+          <CheckBox Name="TakeRound" Content="Round nib, ignoring the lean" />
+
+          <!-- Named KeepAloft rather than KeepAirborne: a XAML Name becomes a field, and a
+               field that collides with a member of this class fails the build in a way whose
+               message points at neither. Five times now. -->
+          <StackPanel Spacing="2">
+            <CheckBox Name="KeepAloft" Content="Keep every airborne reading" />
+            <TextBlock Classes="lede" FontSize="11" Margin="24,0,0,0"
+                       Text="For working out what the pen is doing between strokes, not for recording strokes. Keeps the lot, unfiltered, including the packets that mean the pen has left range." />
+          </StackPanel>
+
+          <StackPanel Spacing="4">
+            <TextBlock Text="Nib size" Classes="label" />
+            <ComboBox Name="TakeSize" HorizontalAlignment="Stretch" />
+            <!-- Large is the point of this: a wobble of a tenth of the range is a fraction of
+                 a pixel on a small nib and plainly visible on a wide one. -->
+            <TextBlock Classes="lede" FontSize="11" Margin="0,2,0,0"
+                       Text="A light-pressure wobble is invisible at 10 and obvious at 300." />
+          </StackPanel>
 
           <Border Background="#FFFFFF" BorderBrush="#E2E2DC" BorderThickness="1"
                   CornerRadius="4" Padding="12,8">
