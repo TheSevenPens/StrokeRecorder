@@ -12,7 +12,6 @@ using Avalonia.Markup.Xaml;
 using Avalonia.Platform.Storage;
 using Avalonia.Media;
 using WinPenKit.Diagnostics;
-using Avalonia.Threading;
 using SkiaSharp;
 using StrokeFieldGuide.Brushes;
 using Nib = StrokeFieldGuide.Brushes.Brush;
@@ -47,15 +46,6 @@ namespace StrokeFieldGuide.Recorder;
         "so it would be a second release path nobody calls.")]
 public partial class MainWindow : Window
 {
-    /// <summary>How often the session is drained, in milliseconds.</summary>
-    /// <remarks>
-    /// A poll rather than a callback, because that is the shape <see cref="IPenSession"/>
-    /// offers: it queues points on its own thread and hands them over when asked. Sixteen
-    /// milliseconds is a frame, and a tablet reporting at 200 Hz will hand over three or four
-    /// at a time -- which is worth seeing rather than hiding, so the readout says how many.
-    /// </remarks>
-    private const int PollMilliseconds = 16;
-
     /// <summary>
     /// The sizes offered, rather than a free slider.
     /// </summary>
@@ -121,7 +111,16 @@ public partial class MainWindow : Window
     private readonly PenPad _strip;
     private readonly PenPad _pad;
     private readonly PenPad _replay;
-    private readonly DispatcherTimer _poll;
+    /// <summary>
+    /// The pen, opened and polled. Shared with the lab, and that is the point.
+    /// </summary>
+    /// <remarks>
+    /// This window used to own a <c>DispatcherTimer</c>, an <c>IPenSession</c> and a drain of
+    /// its own, borrowing two static helpers from the stream the lab used. Which is not
+    /// sharing: the two had already disagreed about when a batch is stamped, and the one that
+    /// was wrong is the one whose output gets published.
+    /// </remarks>
+    private readonly PenStream _pen = new();
 
     private readonly Readout _api = new("api");
     /// <summary>
@@ -180,7 +179,6 @@ public partial class MainWindow : Window
     /// </remarks>
     private readonly Readout _batch = new("queue depth");
 
-    private IPenSession? _session;
 
     /// <summary>Whether the window exists yet, which a session needs and a constructor has not.</summary>
     private bool _shown;
@@ -476,17 +474,16 @@ public partial class MainWindow : Window
         // Every sample in WinPenKit does this in one line and this window never did. It has not
         // cost a take yet only because nobody has left the window mid-recording -- which is a
         // thing a person doing a long series of strokes will eventually do.
-        Activated += (_, _) => _session?.OnActivated();
+        Activated += (_, _) => _pen.Session?.OnActivated();
 
         // A key released while this window is not in front never arrives here, so the latch
         // would stay raised and the space bar would be dead until it was pressed and released
         // again. The same reason the lab clears its hand-panning flag on deactivation.
         Deactivated += (_, _) => _spaceHeld = false;
 
-        _poll = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(PollMilliseconds) };
-        _poll.Tick += (_, _) =>
+        _pen.Drained += (_, batch) =>
         {
-            Drain();
+            Took(batch);
 
             // Whether or not that brought any readings. A wall clock that only moved when the
             // pen reported would be the same misleading thing wearing a different number.
@@ -653,9 +650,9 @@ public partial class MainWindow : Window
     {
         this.FindControl<TextBlock>("FootNote")!.Text = _step switch
         {
-            1 when _session is null => "No session open.",
+            1 when _pen.Session is null => "No session open.",
             1 when _seen == 0 => "Draw on the strip once, and the pen will have proved itself.",
-            1 => $"{_seen} points reported through {_session!.Api}. Ready.",
+            1 => $"{_seen} points reported through {_pen.Session!.Api}. Ready.",
 
             2 when _gesture is null => "Pick what you are going to draw.",
             2 => $"{_gesture!.Label}. Next is where you draw it.",
@@ -813,7 +810,7 @@ public partial class MainWindow : Window
     /// in step one -- reopening for the take would mean the thing that was checked and the
     /// thing that recorded were two different sessions.
     /// </remarks>
-    private void Route(PenPoint point, IPenSession session, long arrived)
+    private void Route(PenPoint point, Reading reading, IPenSession session)
     {
         if (_step == 1)
         {
@@ -822,7 +819,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_step == 3) Record(point, session, arrived);
+        if (_step == 3) Record(point, reading, session);
     }
 
     /// <summary>
@@ -832,10 +829,8 @@ public partial class MainWindow : Window
     /// The state machine this used to carry is <see cref="Capturing"/>. What is left is the
     /// half that needs a window: ink on the pad, the readouts, and which step is shown.
     /// </remarks>
-    private void Record(PenPoint point, IPenSession session, long arrived)
+    private void Record(PenPoint point, Reading reading, IPenSession session)
     {
-        var reading = Reported(point, arrived);
-
         var what = _capturing.Took(reading, _pad.Covers(reading.X, reading.Y));
 
         if (what.Forget)
@@ -898,8 +893,8 @@ public partial class MainWindow : Window
     private void StopTake()
     {
         var counted =
-            ReferenceEquals(_session, _countedFrom)
-            && Counts(_session) is { } now
+            ReferenceEquals(_pen.Session, _countedFrom)
+            && Counts(_pen.Session) is { } now
             && _capturing.ArmedAt is { } then
             && now.Item1 >= then.Item1 && now.Item2 >= then.Item2 && now.Item3 >= then.Item3
                 ? (now.Item1 - then.Item1, now.Item2 - then.Item2, now.Item3 - then.Item3)
@@ -915,14 +910,14 @@ public partial class MainWindow : Window
 
         _capturing.KeepAirborne = Keeping;
 
-        if (_gesture is { } gesture && _session is { IsRunning: true } armed)
+        if (_gesture is { } gesture && _pen.Session is { IsRunning: true } armed)
         {
             _capturing.Choose(gesture, Speaking(armed));
 
             _countedFrom = armed;
         }
 
-        Apply(_capturing.Arm(Counts(_session)));
+        Apply(_capturing.Arm(Counts(_pen.Session)));
     }
 
     /// <summary>What a session says about itself, in the capture's terms.</summary>
@@ -2131,12 +2126,11 @@ public partial class MainWindow : Window
     /// <summary>Closes the session, if there is one. Safe to call when there is not.</summary>
     private void Shut()
     {
-        if (_session is null) return;
+        if (_pen.Session is null) return;
 
-        Close(_session);
-        _session = null;
-
-        _poll.Stop();
+        // Stops polling before closing, and does both. That order was this window's own bug
+        // once: a tick that fired after the session closed drained a session that was gone.
+        _pen.Stop();
 
         this.FindControl<TextBlock>("Conventions")!.Text = "";
         Say("", "");
@@ -2154,23 +2148,21 @@ public partial class MainWindow : Window
         // a take of no readings without anything going wrong. The Wintab and WM_POINTER
         // backends do not care, which is what makes this the sort of fault that ships: it is
         // invisible on the backend most likely to be used and total on the other.
-        var session = PenBackends.Open(chosen.Backend.Api, this);
-
         // The window handle is what a WM_POINTER session subclasses; a Wintab one makes its
         // own pump window and ignores it, and the Avalonia one is already attached to a
         // control. Passing it in every case is simpler than deciding here which cares.
-        var failure = session.Start(TryGetPlatformHandle()?.Handle ?? IntPtr.Zero);
+        var failure = _pen.Start(
+            chosen.Backend.Api, this, TryGetPlatformHandle()?.Handle ?? IntPtr.Zero);
 
         if (failure is not null)
         {
-            session.Dispose();
-
             Say($"Could not start: {failure}", "", trouble: true);
 
             return;
         }
 
-        _session = session;
+        var session = _pen.Session!;
+
         _haveLast = false;
         _seen = 0;
         _arrivals.Clear();
@@ -2181,70 +2173,60 @@ public partial class MainWindow : Window
 
         Say("Waiting for the pen.", Plainly(session.Conventions.ToString() ?? ""));
 
-        _poll.Start();
-
         Refresh();
     }
 
     /// <summary>
-    /// Microseconds on a clock this application owns, for stamping when a reading arrived.
+    /// One batch, already drained and already stamped.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Not <see cref="Environment.TickCount64"/>, which moves in steps of about 16 ms on
-    /// Windows -- the same order as the poll it would be measuring, so a gap of one poll and a
-    /// gap of none would read alike. <see cref="Stopwatch"/> is monotonic and does not step.
+    /// <b>Everything here runs after the arrival time was taken</b>, and that is the whole
+    /// reason this is a subscriber rather than a drain of its own. It used to own the loop, and
+    /// updated two readouts and walked a ring buffer between taking the packets and stamping
+    /// them — so the timestamp on every published recording included the cost of that work, and
+    /// the cost grew with the size of the batch, which is the very thing the queue and rate
+    /// readouts measure.
     /// </para>
     /// <para>
-    /// Static, so every reading in a session is on one origin. The origin itself is
-    /// meaningless; the differences are the point, and the trace rebases them anyway.
+    /// There is nowhere left to put that mistake: the batch arrives carrying its own
+    /// <see cref="Batch.Arrived"/>, decided in <see cref="Draining"/> before this window is
+    /// told anything.
     /// </para>
     /// </remarks>
-    /// <remarks>
-    /// Kept as a name this file uses in a dozen places, and delegating, so that the host
-    /// clock this recorder stamps with is the same one the lab stamps with. Two copies of a
-    /// clock is how two applications come to disagree about when a reading arrived.
-    /// </remarks>
-    private static long Arrival() => PenStream.Arrival();
-
-    private void Drain()
+    private void Took(Batch batch)
     {
-        if (_session is not { IsRunning: true } session) return;
+        var session = batch.Session;
 
-        var points = session.DrainPoints();
+        _batch.Saw(batch.Count);
 
-        _batch.Saw(points.Length);
+        if (batch.Count == 0) return;
 
-        if (points.Length == 0) return;
-
-        _seen += points.Length;
+        _seen += batch.Count;
 
         var now = Environment.TickCount64;
-        for (var each = 0; each < points.Length; each++) _arrivals.Enqueue(now);
+        for (var each = 0; each < batch.Count; each++) _arrivals.Enqueue(now);
         while (_arrivals.Count > 0 && now - _arrivals.Peek() > 1000) _arrivals.Dequeue();
 
         _rate.Saw(_arrivals.Count);
 
         var before = _take?.Count ?? 0;
 
-        // One stamp for the batch, deliberately. Every reading that came across together
-        // carries the same arrival, so "did these two packets reach the application in the
-        // same poll" is answered by comparing two numbers for equality rather than by
-        // reasoning about a 16 ms timer's resolution.
-        var arrived = Arrival();
-
-        foreach (var point in points) Route(point, session, arrived);
+        for (var each = 0; each < batch.Count; each++)
+        {
+            Route(batch.Points[each], batch.Readings[each], session);
+        }
 
         // One poll, however many readings it brought. Counted here rather than inside the
         // per-reading path, which would count readings twice under another name.
         if (_take is not null && _take.Count > before) _take.Polled();
 
-        var last = points[^1];
+        var last = batch.Points[^1];
 
-        // Shown from the last point of the batch, and shown whether or not the tip is down:
+        // Shown from the last reading of the batch, and shown whether or not the tip is down:
         // lean and twist are reported while hovering, so the pen can be turned and watched
         // without laying any ink.
-        var shown = Reported(last);
+        var shown = batch.Readings[^1];
 
         _gauges.Show(shown);
         _takeGauges.Show(shown);
@@ -2254,6 +2236,8 @@ public partial class MainWindow : Window
 
         Aim(shown, session.MaxPressure);
 
+        // Off the packet, not the reading: a Reading keeps a lean and an azimuth where the
+        // device reported a tilt x and a tilt y, and these two boxes show what it reported.
         _tiltX.Saw(last.TiltX);
         _tiltY.Saw(last.TiltY);
 
@@ -2263,7 +2247,6 @@ public partial class MainWindow : Window
         Refresh();
 
         _pressure.Saw(last.Pressure);
-
     }
 
     /// <summary>
@@ -2350,13 +2333,13 @@ public partial class MainWindow : Window
     /// </remarks>
     /// <summary>What a packet says, in this guide's terms.</summary>
     /// <remarks>
-    /// The conversion itself is <see cref="PenStream.Of"/>, and the reasoning behind every
+    /// The conversion itself is <see cref="Draining.Of"/>, and the reasoning behind every
     /// field is written there. It moved out of this file when the lab started opening its own
     /// session: a second reading of the same packet is how two applications come to disagree
     /// about what the pen did.
     /// </remarks>
     private static Reading Reported(PenPoint point, long arrived = 0) =>
-        PenStream.Of(point, arrived);
+        Draining.Of(point, arrived);
 
     private void Wipe()
     {
@@ -2470,22 +2453,12 @@ public partial class MainWindow : Window
 
     private void Shutdown()
     {
-        _poll.Stop();
-
-        Close(_session);
-        _session = null;
+        // The stream stops its own timer before closing its session.
+        _pen.Dispose();
 
         _strip.Dispose();
         _pad.Dispose();
         _replay.Dispose();
-    }
-
-    private static void Close(IPenSession? session)
-    {
-        if (session is null) return;
-
-        session.Stop();
-        session.Dispose();
     }
 
     /// <summary>A backend and whether this machine can open it.</summary>
