@@ -373,16 +373,16 @@ public partial class MainWindow : Window
         }
 
         var backends = this.FindControl<ComboBox>("Backends")!;
-        var available = Pen.Available();
+        var available = PenBackends.Available();
 
         // Every backend is listed, and the ones this machine cannot open are listed as
         // unavailable rather than left out. A backend that is absent because no driver is
         // installed and one that was never offered look the same in a shorter list.
-        backends.ItemsSource = Pen.All
+        backends.ItemsSource = PenBackends.All
             .Select(backend => new BackendChoice(backend, available.Contains(backend.Api)))
             .ToList();
 
-        backends.SelectedIndex = Pen.All
+        backends.SelectedIndex = PenBackends.All
             .Select((backend, index) => (backend, index))
             .Where(pair => available.Contains(pair.backend.Api))
             .Select(pair => pair.index)
@@ -2458,7 +2458,7 @@ public partial class MainWindow : Window
         // a take of no readings without anything going wrong. The Wintab and WM_POINTER
         // backends do not care, which is what makes this the sort of fault that ships: it is
         // invisible on the backend most likely to be used and total on the other.
-        var session = Pen.Open(chosen.Backend.Api, this);
+        var session = PenBackends.Open(chosen.Backend.Api, this);
 
         // The window handle is what a WM_POINTER session subclasses; a Wintab one makes its
         // own pump window and ignores it, and the Avalonia one is already attached to a
@@ -2504,8 +2504,12 @@ public partial class MainWindow : Window
     /// meaningless; the differences are the point, and the trace rebases them anyway.
     /// </para>
     /// </remarks>
-    private static long Arrival() =>
-        (long)(Stopwatch.GetTimestamp() * (1_000_000.0 / Stopwatch.Frequency));
+    /// <remarks>
+    /// Kept as a name this file uses in a dozen places, and delegating, so that the host
+    /// clock this recorder stamps with is the same one the lab stamps with. Two copies of a
+    /// clock is how two applications come to disagree about when a reading arrived.
+    /// </remarks>
+    private static long Arrival() => PenStream.Arrival();
 
     private void Drain()
     {
@@ -2648,35 +2652,15 @@ public partial class MainWindow : Window
     /// nothing checks, and both of the ways this window once put marks in the wrong place
     /// were arithmetic written in this file.
     /// </remarks>
+    /// <summary>What a packet says, in this guide's terms.</summary>
+    /// <remarks>
+    /// The conversion itself is <see cref="PenStream.Of"/>, and the reasoning behind every
+    /// field is written there. It moved out of this file when the lab started opening its own
+    /// session: a second reading of the same packet is how two applications come to disagree
+    /// about what the pen did.
+    /// </remarks>
     private static Reading Reported(PenPoint point, long arrived = 0) =>
-        new(point.DesktopX, point.DesktopY, point.Pressure, point.TimestampMicroseconds,
-            // Altitude counts up from the tablet and a lean counts away from vertical, so
-            // one is the other subtracted from a right angle. Azimuth and twist come across
-            // untouched: both are already the angle the guide wants.
-            // Wintab's pkZ. Added to chase the airborne record's apparent silence before a
-            // landing, which turned out to be the pen's timestamp resynchronising rather than
-            // any silence -- so it explains nothing, and is kept because it is a real channel
-            // nothing else here measures: 0 to 401, falling steadily as the pen comes down.
-            //
-            // The reasoning it was added under was also wrong twice over. Wintab ignores the
-            // time, serial-number and button bits of lcMoveMask, so PK.ALL never did ask for
-            // a packet on "any change"; and the device sends byte-identical packets at full
-            // rate regardless, so there was no change to go looking for.
-            Height: point.Z,
-
-            // Raw. Bit 1 is a queue overflow and has been clear on every reading of every take
-            // since this column existed, which is one of the several ways the silence it was
-            // added to explain turned out not to be one. Bit 0 is documented as "the cursor is
-            // out of the context", so zero while hovering and in contact is the spec's own
-            // polarity -- and asking IsInProximity for it rejected every hovering reading,
-            // which is WinPenKit#125.
-            Status: point.Status,
-            Lean: 90 - point.Altitude, Azimuth: point.Azimuth, Twist: point.Twist,
-
-            // The host clock, stamped by whoever pulled this packet out of the session. The
-            // pen's own timestamp above is the only one a trace has ever carried, and a gap
-            // in it cannot be told apart from a gap in delivery without a second opinion.
-            Arrived: arrived);
+        PenStream.Of(point, arrived);
 
     private void Wipe()
     {
