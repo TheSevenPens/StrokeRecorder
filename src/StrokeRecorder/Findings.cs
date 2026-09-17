@@ -324,14 +324,15 @@ public static class Findings
         if (take.Routed == 0) return;
 
         var stored = take.Count + take.Aloft.Count + take.DroppedOffPad + take.AfterTheStop
-                     + take.LeftOut;
+                     + take.LeftOut + take.KeptAlongside;
 
         if (stored == take.Routed)
         {
             found.Add(new(Tone.Good,
                 $"Every one of {take.Routed} readings this window was handed is accounted for",
                 $"{take.Count} in strokes, {take.Aloft.Count} in the airborne record, "
-                + $"{take.LeftOut} airborne and deliberately not kept, "
+                + $"{take.KeptAlongside} airborne and kept beside a stroke, "
+                + $"{take.LeftOut} airborne and kept nowhere, "
                 + $"{take.DroppedOffPad} off the pad, {take.AfterTheStop} after the stop. "
                 + "Counted from this take alone, so it holds whether or not the session below "
                 + "could be asked what it was given."));
@@ -346,8 +347,9 @@ public static class Findings
                 ? $"{missing} readings reached this window and are in none of its columns"
                 : $"{-missing} more readings are stored than were handed over",
             $"{take.Routed} were handed over; {take.Count} are in strokes, {take.Aloft.Count} "
-            + $"in the airborne record, {take.LeftOut} were airborne and deliberately not "
-            + $"kept, {take.DroppedOffPad} were off the pad and {take.AfterTheStop} arrived "
+            + $"in the airborne record, {take.KeptAlongside} were airborne and kept beside a "
+            + $"stroke, {take.LeftOut} were airborne and kept nowhere, "
+            + $"{take.DroppedOffPad} were off the pad and {take.AfterTheStop} arrived "
             + "after the stop. That is a fault in the recorder rather than anything about "
             + "the pen."));
     }

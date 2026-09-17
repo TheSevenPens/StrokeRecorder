@@ -105,6 +105,7 @@ public static class Trace
         json.WriteNumber(TraceFormat.Field.OffThePad, take.DroppedOffPad);
         json.WriteNumber(TraceFormat.Field.AfterTheStop, take.AfterTheStop);
         json.WriteNumber(TraceFormat.Field.AirborneNotKept, take.LeftOut);
+        json.WriteNumber(TraceFormat.Field.AirborneKeptAlongside, take.KeptAlongside);
 
         // From beneath the session's own filtering, where the backend can say. The difference
         // between what the driver delivered and what the session passed on is the one number

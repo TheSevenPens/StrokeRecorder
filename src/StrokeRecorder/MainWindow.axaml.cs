@@ -1617,7 +1617,8 @@ public partial class MainWindow : Window
         host.Children.Add(Tally("handed over", take.Routed, rule: true));
         host.Children.Add(Tally("in strokes", take.Count));
         host.Children.Add(Tally("in the airborne record", take.Aloft.Count));
-        host.Children.Add(Tally("airborne, not kept", take.LeftOut));
+        host.Children.Add(Tally("airborne, beside a stroke", take.KeptAlongside));
+        host.Children.Add(Tally("airborne, kept nowhere", take.LeftOut));
         host.Children.Add(Tally("off the pad", take.DroppedOffPad));
         host.Children.Add(Tally("after the stop", take.AfterTheStop));
 

@@ -360,10 +360,46 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
     /// is not much use for the question this one exists to answer.
     /// </para>
     /// </remarks>
-    public int LeftOut { get; private set; }
+    public int LeftOut => _airborneNotKept == 0
+        ? 0
+        : Math.Max(0, _airborneNotKept - Alongside);
 
-    /// <summary>One airborne reading, not kept because none are being kept.</summary>
-    public void OneLeftOut() => LeftOut++;
+    /// <summary>
+    /// Airborne readings that were kept after all, beside the stroke they belong to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The other half of the number above, and the reason it had to be split. A hovering
+    /// reading is counted as not kept the moment it arrives, and may then be adopted into a
+    /// stroke's approach or departure when the tip goes down — so a take reporting "498
+    /// airborne and not kept" had 233 of them sitting in the file, and said so nowhere.
+    /// </para>
+    /// <para>
+    /// Zero while the airborne record is being kept, because then every airborne reading is in
+    /// <see cref="Aloft"/> and an approach is a second copy of one already counted. Counting it
+    /// again here would make the ledger add up to more than arrived.
+    /// </para>
+    /// </remarks>
+    public int KeptAlongside => _airborneNotKept == 0 ? 0 : Math.Min(Alongside, _airborneNotKept);
+
+    /// <summary>Every reading held as some stroke's approach or departure.</summary>
+    private int Alongside => _contacts.Sum(each => each.Approach.Count + each.Departure.Count);
+
+    /// <summary>
+    /// Airborne readings handed over while the airborne record was switched off.
+    /// </summary>
+    /// <remarks>
+    /// Raw, and split into <see cref="LeftOut"/> and <see cref="KeptAlongside"/> for reporting.
+    /// The two always add back to this, so the ledger balances however the split falls.
+    /// </remarks>
+    private int _airborneNotKept;
+
+    /// <summary>One airborne reading, arriving while none are being kept.</summary>
+    /// <remarks>
+    /// Whether it stays unkept is not known yet: the tip may come down within the approach
+    /// window and adopt it. That is why this counts, and the split above reports.
+    /// </remarks>
+    public void OneLeftOut() => _airborneNotKept++;
 
     /// <summary>
     /// Restores the counts a take was written with, for one read back from a file.
@@ -375,12 +411,17 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
     /// claiming nothing was ever handed over, which is the one reading of it that is never
     /// true.
     /// </remarks>
-    public void Reopened(int routed, int offPad, int afterTheStop, int leftOut = 0)
+    public void Reopened(
+        int routed, int offPad, int afterTheStop, int leftOut = 0, int keptAlongside = 0)
     {
         Routed = routed;
         DroppedOffPad = offPad;
         AfterTheStop = afterTheStop;
-        LeftOut = leftOut;
+
+        // The raw count, from the two halves the file reports. The split is recomputed from
+        // the contacts that were just read back, so a file written before this existed still
+        // restores correctly: its whole figure lands in the raw counter and splits itself.
+        _airborneNotKept = leftOut + keptAlongside;
     }
 
     /// <summary>Every reading the recorder was handed while this take was open.</summary>

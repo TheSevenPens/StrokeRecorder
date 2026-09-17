@@ -115,9 +115,78 @@ public class Accounting
 
         Assert.True(Says(found, "accounted for"));
 
-        Assert.True(Says(found, "deliberately not kept"),
+        Assert.True(Says(found, "kept nowhere"),
             "the column should say what it holds");
+
+        // None of them was adopted, so the whole figure is in the one column.
+        Assert.Equal(116, take.LeftOut);
+        Assert.Equal(0, take.KeptAlongside);
     }
+
+    /// <summary>
+    /// A hover reading adopted into an approach is not reported as kept nowhere.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The second half of the same fault. A reading is counted as not kept the moment it
+    /// arrives, and may then be adopted into a stroke's approach when the tip goes down — so a
+    /// real five-stroke take reported <b>498 airborne and not kept</b> while 233 of them sat in
+    /// the file as approaches and departures. The number balanced; what it said was untrue.
+    /// </para>
+    /// <para>
+    /// The two halves still add back to what arrived, so the ledger balances either way. That
+    /// is the point: this changes what the figure means, not whether it adds up.
+    /// </para>
+    /// </remarks>
+    [Fact]
+    public void Airborne_readings_adopted_into_a_stroke_are_counted_as_kept()
+    {
+        var take = Made(readings: 18, routed: 137);
+
+        for (var each = 0; each < 116; each++) take.OneLeftOut();
+
+        for (var each = 0; each < 3; each++) take.DroppedOne();
+
+        take.Current!.Approaching(
+            [Hovering(1), Hovering(2), Hovering(3), Hovering(4)], sinceLastSeen: 900, null);
+
+        take.Current!.Departing(Hovering(5));
+
+        Assert.Equal(5, take.KeptAlongside);
+        Assert.Equal(111, take.LeftOut);
+
+        // Still every reading that arrived, split rather than changed.
+        Assert.Equal(116, take.LeftOut + take.KeptAlongside);
+
+        var found = Of(take);
+
+        Assert.True(Says(found, "accounted for"));
+        Assert.False(Says(found, "in none of its columns"));
+        Assert.True(Says(found, "beside a stroke"));
+    }
+
+    /// <summary>With the airborne record on, an approach is a second copy of a kept reading.</summary>
+    /// <remarks>
+    /// So it must not be counted again. Counting it would make the ledger add up to more than
+    /// arrived, which the recorder reports as its own fault.
+    /// </remarks>
+    [Fact]
+    public void An_approach_is_not_counted_twice_when_the_airborne_record_is_kept()
+    {
+        var take = Made(readings: 18, routed: 137);
+
+        take.KeepAll([Hovering(1), Hovering(2), Hovering(3)]);
+
+        take.Current!.Approaching([Hovering(1), Hovering(2)], sinceLastSeen: 900, null);
+
+        Assert.Equal(0, take.LeftOut);
+        Assert.Equal(0, take.KeptAlongside);
+    }
+
+    private static Reading Hovering(int each) => new(
+        X: 100 + each, Y: 40, Pressure: 0,
+        At: each * 4166, Height: 12, Status: 0,
+        Lean: 0, Azimuth: 0, Twist: 0, Arrived: each * 6200);
 
     [Fact]
     public void More_stored_than_handed_over_is_also_reported()

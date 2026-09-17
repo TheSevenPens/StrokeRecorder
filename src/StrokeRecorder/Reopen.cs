@@ -138,7 +138,8 @@ public static class Reopen
                 (int)Number(root, TraceFormat.Field.HandedOver),
                 (int)Number(root, TraceFormat.Field.OffThePad),
                 (int)Number(root, TraceFormat.Field.AfterTheStop),
-                (int)Number(root, TraceFormat.Field.AirborneNotKept));
+                (int)Number(root, TraceFormat.Field.AirborneNotKept),
+                (int)Number(root, TraceFormat.Field.AirborneKeptAlongside));
 
             return take.Holds
                 ? new(take, null)

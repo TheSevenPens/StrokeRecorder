@@ -225,8 +225,10 @@ public sealed class Capturing
             }
             else
             {
-                // Counted, because it was handed over and it is not in any column. Left out
-                // deliberately is a disposition; it is not the same as missing.
+                // Counted, because it was handed over and nothing else has a column for it
+                // yet. It may still be adopted into the next stroke's approach, which is why
+                // Take reports this figure split rather than raw. Left out deliberately is a
+                // disposition; it is not the same as missing.
                 Take?.OneLeftOut();
             }
 
