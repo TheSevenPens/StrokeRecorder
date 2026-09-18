@@ -263,6 +263,38 @@ public class TimeSemantics
     }
 
     [Fact]
+    public void A_take_read_back_from_a_file_is_as_long_as_it_is_not_as_old()
+    {
+        // Reopen restores recordedAt from the file and never sets StoppedAt, so Recording --
+        // a wall clock from arming to stopping -- measures how long the file has existed.
+        // Opening yesterday's take put 115,076 seconds on a readout that said "stopped".
+        var take = new Take(Gestures.All[0], InputApi.WintabDigitizer, 32767,
+                            new InkTransform(1, 1, 0, 0))
+        {
+            At = DateTimeOffset.Now.AddHours(-32),
+        };
+
+        var readings = Disagreeing(onHost: 3, onPen: 2);
+        var contact = take.Begin();
+
+        foreach (var reading in readings) contact.Add(reading);
+
+        // As Reopen leaves one. This line is the whole test: the counts a take was written
+        // with are restored, so a take off a disk reports every reading it ever routed and
+        // has seen none of them. Keying the readout off Routed therefore changed nothing, and
+        // the first version of this test passed because it left this out.
+        take.Reopened(routed: readings.Count, offPad: 0, afterTheStop: 0);
+
+        Assert.True(take.Routed > 0);
+        Assert.False(take.Recorded);
+
+        Assert.True(take.Recording / 1000 > 100_000, "the age of the file, which is not its length");
+
+        Assert.Equal(3, take.Lasted.Seconds, 2);
+        Assert.Equal(Clock.Host, take.Lasted.On);
+    }
+
+    [Fact]
     public void The_upright_finding_measures_its_share_on_the_host_clock()
     {
         // A lean of one degree: tilted, so the finding runs at all, and inside the three

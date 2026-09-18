@@ -516,6 +516,29 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
     /// <see cref="Timing.Said"/> renders the pair for a one-line readout.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// Whether readings reached this take through a window, rather than off a disk.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="FirstSeen"/> and not <see cref="Routed"/>. <see cref="Reopened"/> restores
+    /// the counts a take was written with -- <c>Routed</c> among them, because a ledger that
+    /// claimed nothing was ever handed over is the one reading of a take that is never true --
+    /// so a take read from a file reports 1,442 routed and has seen none of them. Only
+    /// <c>Routing</c> sets <c>FirstSeen</c>, and only a window calls it.
+    /// </remarks>
+    public bool Recorded => FirstSeen is not null;
+
+    /// <summary>The first and last readings the take holds, or null when it holds none.</summary>
+    private IReadOnlyList<Reading>? Ends()
+    {
+        var first = _contacts.FirstOrDefault(contact => contact.Count > 0);
+        var last = _contacts.LastOrDefault(contact => contact.Count > 0);
+
+        if (first is not null && last is not null) return [first.Readings[0], last.Readings[^1]];
+
+        return Aloft.Count > 1 ? [Aloft[0], Aloft[^1]] : null;
+    }
+
     public (double Seconds, Clock On) Lasted
     {
         get
@@ -525,11 +548,18 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
                 return ((LastArrived - arrived) / 1e6, Clock.Host);
             }
 
-            // Nothing was routed through here, so this take was read back from a file rather
-            // than recorded. Its readings carry the clock instead.
-            if (Routed == 0)
+            // Otherwise the readings carry whatever clock there is, which is the case for a
+            // take read back from a file: nothing was ever routed through it.
+            //
+            // The two ends rather than all of them, because this is read on every tick of the
+            // clock and Readings builds a new list of every reading in the take each time it
+            // is asked. Spanned's own rules then apply to the pair, which is what decides the
+            // clock -- a rebased first arrival of zero against a real last one still says host.
+            var ends = Ends();
+
+            if (ends is not null)
             {
-                var held = Timing.Spanned(Readings.Count > 0 ? Readings : Aloft);
+                var held = Timing.Spanned(ends);
 
                 if (held.On != Clock.None) return held;
             }
