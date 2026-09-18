@@ -1009,9 +1009,23 @@ public partial class MainWindow : Window
         // page asking for a stroke of three to four seconds was timing it on something that
         // ran at 0.673 of real time and telling the reader to draw for half again as long as
         // it meant. Lasted answers the same span on the host clock.
+        //
+        // Recording is a wall clock running from when a take was armed, and it says something
+        // only while this window is the one recording. A take read back from a file was armed
+        // whenever it was originally recorded and was never stopped by anybody here, so Now
+        // minus that is the age of the file: opening yesterday's take put 115,076 seconds on a
+        // readout that also said "stopped", and it climbed every tick. Reported by the person
+        // who opened one.
+        //
+        // Routed counts what this window handed to the take, so none of it means the take was
+        // not recorded here and the number to show is how long the take is.
+        var recordedHere = _take is { Routed: > 0 };
+
         var seconds = _capture is Capture.Armed or Capture.Drawing or Capture.Between or Capture.Taken
             && _take is not null
-            ? _take.Gesture.ManyStrokes ? _take.Recording / 1000 : _take.Lasted.Seconds
+            ? recordedHere && _take.Gesture.ManyStrokes
+                ? _take.Recording / 1000
+                : _take.Lasted.Seconds
             : 0;
 
         this.FindControl<TextBlock>("Clock")!.Text = $"{seconds:F2} s";

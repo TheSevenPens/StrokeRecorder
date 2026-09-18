@@ -263,6 +263,31 @@ public class TimeSemantics
     }
 
     [Fact]
+    public void A_take_read_back_from_a_file_is_as_long_as_it_is_not_as_old()
+    {
+        // Reopen restores recordedAt from the file and never sets StoppedAt, so Recording --
+        // a wall clock from arming to stopping -- measures how long the file has existed.
+        // Opening yesterday's take put 115,076 seconds on a readout that said "stopped".
+        var take = new Take(Gestures.All[0], InputApi.WintabDigitizer, 32767,
+                            new InkTransform(1, 1, 0, 0))
+        {
+            At = DateTimeOffset.Now.AddHours(-32),
+        };
+
+        var contact = take.Begin();
+
+        foreach (var reading in Disagreeing(onHost: 3, onPen: 2)) contact.Add(reading);
+
+        // Nothing was handed to it by a window, which is what says it was read and not
+        // recorded. This is the signal the clock readout keys off.
+        Assert.Equal(0, take.Routed);
+
+        Assert.True(take.Recording / 1000 > 100_000, "the age of the file, which is not its length");
+
+        Assert.Equal(3, take.Lasted.Seconds, 2);
+    }
+
+    [Fact]
     public void The_upright_finding_measures_its_share_on_the_host_clock()
     {
         // A lean of one degree: tilted, so the finding runs at all, and inside the three
