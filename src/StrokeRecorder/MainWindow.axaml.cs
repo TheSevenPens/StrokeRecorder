@@ -1671,51 +1671,91 @@ public partial class MainWindow : Window
     /// behind it and nothing will be added to it. That is what this step wants -- everything
     /// on it is a description of readings that have already been taken.
     /// </remarks>
+    /// <summary>Whether an open is already in progress. See <see cref="Reread"/>.</summary>
+    /// <remarks>
+    /// A plain field and not an interlock: every path that touches it is a UI event handler,
+    /// so they all run on the one thread and the only interleaving possible is the one an
+    /// <c>await</c> creates, which this covers.
+    /// </remarks>
+    private bool _rereading;
+
     private async Task Reread()
     {
         var said = this.FindControl<TextBlock>("Reopened")!;
 
-        var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        // Two buttons call this and neither was gated. Both pickers would open, and the take
+        // that won was whichever file was chosen last -- not whichever was asked for last --
+        // after which it replaced the state the other one had already installed.
+        if (_rereading) return;
+
+        _rereading = true;
+
+        try
         {
-            Title = "Open a take",
-            AllowMultiple = false,
-            SuggestedStartLocation = await StorageProvider.TryGetFolderFromPathAsync(TakesFolder),
-            FileTypeFilter = [new FilePickerFileType("Traces") { Patterns = ["*.json"] }],
-        });
+            var from = await StorageProvider.TryGetFolderFromPathAsync(TakesFolder);
 
-        if (picked.Count == 0) return;
+            var picked = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+            {
+                Title = "Open a take",
+                AllowMultiple = false,
+                SuggestedStartLocation = from,
+                FileTypeFilter = [new FilePickerFileType("Traces") { Patterns = ["*.json"] }],
+            });
 
-        var path = picked[0].TryGetLocalPath();
+            if (picked.Count == 0) return;
 
-        if (path is null)
-        {
-            said.Text = "That file is not on this machine.";
+            var path = picked[0].TryGetLocalPath();
 
-            return;
+            if (path is null)
+            {
+                said.Text = "That file is not on this machine.";
+
+                return;
+            }
+
+            // Off the thread that draws. Reopen touches nothing of Avalonia's -- it reads a
+            // file and builds a take -- and a long one held the window still while it parsed.
+            var read = await Task.Run(() => Reopen.From(path));
+
+            // The window can close while a picker is open, and the parse then finishes into
+            // nothing. Checked after the last await rather than before, because it is the
+            // await that lets the close happen.
+            if (_shut) return;
+
+            if (read.Take is not { } take)
+            {
+                said.Text = $"Could not open it: {read.Why}";
+
+                return;
+            }
+
+            _capturing.Opened(take);
+            _gesture = take.Gesture;
+
+            var name = Path.GetFileNameWithoutExtension(path);
+
+            said.Text = name;
+
+            _opened = name;
+
+            // Straight to the analysis, which is the only reason to open one. GoTo is what
+            // moves a step; Stage only redraws the record step's own words, so setting _step
+            // beside it left the reader on the pre-flight with a take loaded and nothing to
+            // show for it.
+            GoTo(4);
         }
-
-        var read = Reopen.From(path);
-
-        if (read.Take is not { } take)
+        catch (Exception why)
         {
-            said.Text = $"Could not open it: {read.Why}";
-
-            return;
+            // The picker is the platform's, and it can fail for reasons this application has
+            // no say in -- a shell that will not start, a folder that has gone. Unhandled,
+            // that is an exception on a void event handler, which is a crash rather than a
+            // message.
+            said.Text = $"Could not open it: {why.Message}";
         }
-
-        _capturing.Opened(take);
-        _gesture = take.Gesture;
-
-        var name = Path.GetFileNameWithoutExtension(path);
-
-        said.Text = name;
-
-        _opened = name;
-
-        // Straight to the analysis, which is the only reason to open one. GoTo is what moves
-        // a step; Stage only redraws the record step's own words, so setting _step beside it
-        // left the reader on the pre-flight with a take loaded and nothing to show for it.
-        GoTo(4);
+        finally
+        {
+            _rereading = false;
+        }
     }
 
     private void Strokes()
@@ -2475,8 +2515,19 @@ public partial class MainWindow : Window
         Chose();
     }
 
+    /// <summary>Set once the window has gone, so work that outlives it can stop.</summary>
+    /// <remarks>
+    /// An open is the one thing here that can still be running when the window closes: it is
+    /// waiting on a picker somebody may never answer. Everything it would do on the way back
+    /// -- install a take, move a step, write into a readout -- is about a window that is no
+    /// longer on screen.
+    /// </remarks>
+    private bool _shut;
+
     private void Shutdown()
     {
+        _shut = true;
+
         // The stream stops its own timer before closing its session.
         _pen.Dispose();
 
