@@ -725,11 +725,15 @@ public static class Findings
         }
 
         var share = upright / (double)take.Readings.Count;
-        var milliseconds = take.Milliseconds * share;
+
+        // Contact, not the whole take, because the share is of the stroke's own readings. On
+        // the host clock: this used to scale take.Milliseconds, so the share of a stroke was
+        // right and the milliseconds it was a share of were packets.
+        var (seconds, on) = Timing.Spanned(take.Readings);
 
         found.Add(new(share > 0.05 ? Tone.Warn : Tone.Plain,
             $"{share * 100:F0}% of the stroke within {TooUprightToAim:F0}° of upright",
-            $"About {milliseconds:F0} ms of it. Below {TooUprightToAim:F0}° the reported "
+            $"About {Timing.Said(seconds * share, on)} of it. Below {TooUprightToAim:F0}° the reported "
             + "azimuth starts making occasional large jumps -- 45 degrees at a lean of one, "
             + "measured -- and a nib driven from it jumps with them. Where in the stroke it "
             + "happened matters as much as how much: at the ends is where a taper is."));
