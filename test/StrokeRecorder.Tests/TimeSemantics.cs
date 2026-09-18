@@ -274,17 +274,24 @@ public class TimeSemantics
             At = DateTimeOffset.Now.AddHours(-32),
         };
 
+        var readings = Disagreeing(onHost: 3, onPen: 2);
         var contact = take.Begin();
 
-        foreach (var reading in Disagreeing(onHost: 3, onPen: 2)) contact.Add(reading);
+        foreach (var reading in readings) contact.Add(reading);
 
-        // Nothing was handed to it by a window, which is what says it was read and not
-        // recorded. This is the signal the clock readout keys off.
-        Assert.Equal(0, take.Routed);
+        // As Reopen leaves one. This line is the whole test: the counts a take was written
+        // with are restored, so a take off a disk reports every reading it ever routed and
+        // has seen none of them. Keying the readout off Routed therefore changed nothing, and
+        // the first version of this test passed because it left this out.
+        take.Reopened(routed: readings.Count, offPad: 0, afterTheStop: 0);
+
+        Assert.True(take.Routed > 0);
+        Assert.False(take.Recorded);
 
         Assert.True(take.Recording / 1000 > 100_000, "the age of the file, which is not its length");
 
         Assert.Equal(3, take.Lasted.Seconds, 2);
+        Assert.Equal(Clock.Host, take.Lasted.On);
     }
 
     [Fact]

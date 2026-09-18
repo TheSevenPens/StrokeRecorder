@@ -1017,9 +1017,11 @@ public partial class MainWindow : Window
         // readout that also said "stopped", and it climbed every tick. Reported by the person
         // who opened one.
         //
-        // Routed counts what this window handed to the take, so none of it means the take was
-        // not recorded here and the number to show is how long the take is.
-        var recordedHere = _take is { Routed: > 0 };
+        // Recorded is FirstSeen and deliberately not Routed: Reopened restores the counts a
+        // take was written with, so one read from a file reports every reading it ever routed
+        // and has seen none of them. Asking Routed here left the clock reading the file's age
+        // exactly as before.
+        var recordedHere = _take is { Recorded: true };
 
         var seconds = _capture is Capture.Armed or Capture.Drawing or Capture.Between or Capture.Taken
             && _take is not null
