@@ -860,7 +860,13 @@ public partial class MainWindow : Window
             Lay(_pad, point, session.MaxPressure, _take!.Placed);
 
             _took.Saw(_take.Count);
-            _lasted.Saw(_take.Milliseconds);
+
+            // The gauge is labelled in milliseconds, so it is given milliseconds. Where there
+            // is no host clock it is left alone rather than shown the pen's counter: a gauge
+            // has no room to say which clock it is on, and one that cannot say must not guess.
+            var (lasted, on) = _take.Lasted;
+
+            if (on == StrokeRecorder.Clock.Host) _lasted.Saw(lasted * 1000);
 
             Tick();
         }
@@ -996,12 +1002,16 @@ public partial class MainWindow : Window
         // told, who also asked whether the frozen clock and the missing hover data were the
         // same fault. They are not: this one is the display reading the wrong number.
         // A many-stroke take shows the wall clock: it is either recording or it is not, and
-        // the timer is what somebody reads to know which. Every other gesture shows the pen's
-        // own clock, because there the number is the length of one stroke and the page asks
-        // for it in seconds.
+        // the timer is what somebody reads to know which. Every other gesture shows how long
+        // the readings themselves span, because there the number is the length of one stroke.
+        //
+        // That second branch used to read Running, which is the pen's packet counter -- so a
+        // page asking for a stroke of three to four seconds was timing it on something that
+        // ran at 0.673 of real time and telling the reader to draw for half again as long as
+        // it meant. Lasted answers the same span on the host clock.
         var seconds = _capture is Capture.Armed or Capture.Drawing or Capture.Between or Capture.Taken
             && _take is not null
-            ? (_take.Gesture.ManyStrokes ? _take.Recording : _take.Running) / 1000
+            ? _take.Gesture.ManyStrokes ? _take.Recording / 1000 : _take.Lasted.Seconds
             : 0;
 
         this.FindControl<TextBlock>("Clock")!.Text = $"{seconds:F2} s";
@@ -1292,17 +1302,30 @@ public partial class MainWindow : Window
 
         if (_take is { Strokes: 0, Aloft.Count: > 0 } aloft)
         {
+            var (hovered, on) = aloft.Lasted;
+
             list.Children.Add(Said(new Finding(Tone.Good,
                 $"{aloft.Aloft.Count} readings of the pen in the air, and no strokes",
-                $"Over {aloft.Running:F0} ms. A recording of the hovering pen, which is a "
+                $"Over {Timing.Said(hovered, on)}. A recording of the hovering pen, which is a "
                 + "thing worth having on purpose: it says what the tablet reports when "
                 + "nothing is being drawn.")));
 
-            list.Children.Add(Said(new Finding(Tone.Plain,
-                $"The pen reported {1000 * aloft.Aloft.Count / Math.Max(1, aloft.Running):F0} "
-                + "readings a second while hovering",
-                "Against the rate in contact, which the device conventions page puts at 240 "
-                + "on this tablet. The same rate means hovering is reported like drawing.")));
+            // A rate needs a clock, and the pen's counter is not one. Dividing by it gave a
+            // hover rate about half again what the tablet was doing -- and the comparison
+            // below is against a measured 240, so a wrong rate here reads as a real finding
+            // about the device.
+            list.Children.Add(Said(on == StrokeRecorder.Clock.Host && hovered > 0
+                ? new Finding(Tone.Plain,
+                    $"The pen reported {aloft.Aloft.Count / hovered:F0} readings a second "
+                    + "while hovering",
+                    "Against the rate in contact, which the device conventions page puts at "
+                    + "240 on this tablet. The same rate means hovering is reported like "
+                    + "drawing.")
+                : new Finding(Tone.Plain,
+                    "How often the pen reported while hovering cannot be said",
+                    "This recording carries no host timestamp, and a rate worked out from "
+                    + "the pen's own stamp is readings per packet-second, which is readings "
+                    + "per reading. The count above is still the count.")));
 
             Named();
             Refresh();
@@ -1497,7 +1520,7 @@ public partial class MainWindow : Window
 
          columns            {string.Join(", ", Trace.Columns)}
          strokes            {take.Strokes}{Spread(take)}
-         readings           {take.Count} over {take.Milliseconds:F0} ms, {take.Polls} polls
+         readings           {take.Count} over {Timing.Said(Timing.Spanned(take.Readings))}, {take.Polls} polls
          """;
 
     /// <summary>The shortest and longest stroke, where there is more than one to compare.</summary>

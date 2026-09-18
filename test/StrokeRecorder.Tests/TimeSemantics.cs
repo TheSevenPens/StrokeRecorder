@@ -196,4 +196,88 @@ public class TimeSemantics
 
         return take;
     }
+
+    /// <summary>A take as the live path builds one, where every reading is routed first.</summary>
+    private static Take Routed(IReadOnlyList<Reading> readings)
+    {
+        var take = Of("slow-diagonal", readings);
+
+        foreach (var reading in readings) take.Routing(reading);
+
+        return take;
+    }
+
+    [Fact]
+    public void A_takes_one_line_description_is_on_the_host_clock()
+    {
+        var said = Of("slow-diagonal", Disagreeing(onHost: 3, onPen: 2)).Describe();
+
+        Assert.Contains("3000 ms", said);
+        Assert.DoesNotContain("2000 ms", said);
+    }
+
+    [Fact]
+    public void A_routed_take_lasts_on_the_host_clock()
+    {
+        // The live path, where readings reach the take through Routing rather than being
+        // added to a contact by hand. Both have to answer the same way.
+        var (seconds, on) = Routed(Disagreeing(onHost: 3, onPen: 2)).Lasted;
+
+        Assert.Equal(Clock.Host, on);
+        Assert.Equal(3, seconds, 2);
+    }
+
+    [Fact]
+    public void A_rebased_first_arrival_is_a_time_and_not_a_missing_stamp()
+    {
+        // Every take's first arrival is zero once the format has rebased it. Reading that as
+        // "unstamped" and starting from the second batch shortens every reopened take.
+        var readings = Disagreeing(onHost: 3, onPen: 2);
+
+        Assert.Equal(0, readings[0].Arrived);
+
+        Assert.Equal(Clock.Host, Routed(readings).Lasted.On);
+        Assert.Equal(3, Routed(readings).Lasted.Seconds, 2);
+    }
+
+    [Fact]
+    public void Without_a_host_clock_a_description_says_which_clock_it_is_on()
+    {
+        var onlyThePen = Disagreeing(onHost: 3, onPen: 2)
+            .Select(reading => reading with { Arrived = 0 })
+            .ToList();
+
+        var said = Of("slow-diagonal", onlyThePen).Describe();
+
+        Assert.Contains("on the pen's counter", said);
+    }
+
+    [Fact]
+    public void A_take_with_nothing_in_it_does_not_claim_a_duration()
+    {
+        var take = new Take(Gestures.All[0], InputApi.WintabDigitizer, 32767,
+                            new InkTransform(1, 1, 0, 0));
+
+        Assert.Equal(Clock.None, take.Lasted.On);
+        Assert.Contains("an unrecorded length of time", take.Describe());
+    }
+
+    [Fact]
+    public void The_upright_finding_measures_its_share_on_the_host_clock()
+    {
+        // A lean of one degree: tilted, so the finding runs at all, and inside the three
+        // degrees it calls too upright to aim, so the share is the whole stroke. The
+        // milliseconds that share is of used to come from the pen's counter.
+        var barelyLeaning = Disagreeing(onHost: 3, onPen: 2)
+            .Select(reading => reading with { Lean = 1 })
+            .ToList();
+
+        var found = Findings.For(Of("slow-diagonal", barelyLeaning));
+
+        var upright = found.FirstOrDefault(one => one.Title.Contains("of upright"));
+
+        Assert.NotNull(upright);
+        Assert.Contains("3000 ms", upright.Body);
+        Assert.DoesNotContain("2000 ms", upright.Body);
+    }
 }

@@ -454,24 +454,91 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
     /// </remarks>
     public (long FromDriver, long OutsideRegion, long Delivered)? Counted { get; set; }
 
-    public void Routing(long at)
+    /// <summary>The same two ends on the host's clock, where the readings carried one.</summary>
+    /// <remarks>
+    /// Kept beside <see cref="FirstSeen"/> rather than instead of it. The pen's counter is
+    /// evidence about the device and the traces carry it; what it is not is a measure of how
+    /// long anything took. See <see cref="Lasted"/>.
+    /// </remarks>
+    public long LastArrived { get; private set; }
+
+    public long? FirstArrived { get; private set; }
+
+    /// <summary>Whether any reading carried a host stamp at all.</summary>
+    /// <remarks>
+    /// Asked as "was anything ever nonzero", the same question <c>Timing.Available</c> asks,
+    /// and not "is the first one nonzero". A take's first arrival is legitimately zero once
+    /// the format has rebased it, so a zero cannot be read as a missing stamp on its own.
+    /// </remarks>
+    private bool _stamped;
+
+    public void Routing(Reading reading)
     {
         Routed++;
 
-        FirstSeen ??= at;
+        FirstSeen ??= reading.At;
 
-        if (at > LastSeen) LastSeen = at;
+        if (reading.At > LastSeen) LastSeen = reading.At;
+
+        FirstArrived ??= reading.Arrived;
+
+        if (reading.Arrived > LastArrived) LastArrived = reading.Arrived;
+
+        _stamped |= reading.Arrived != 0;
     }
 
     /// <summary>
-    /// How long the take has been running, in milliseconds, hover included.
+    /// How long the take has been running, in milliseconds, hover included, on the pen's clock.
     /// </summary>
     /// <remarks>
     /// From the <b>first reading the take saw</b>, not the first contact. On a many-stroke
     /// take that is the moment somebody armed it, which is when they think the recording
     /// started and is therefore what a clock should agree with.
+    /// <para>
+    /// <b>Not elapsed time</b>, for the reason <see cref="Milliseconds"/> gives. Anything
+    /// showing this to a reader as a length of time wants <see cref="Lasted"/>.
+    /// </para>
     /// </remarks>
     public double Running => FirstSeen is { } from ? (LastSeen - from) / 1000.0 : 0;
+
+    /// <summary>
+    /// How long the take lasted and on which clock, hover included, end to end.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same span <see cref="Running"/> covers -- everything the take saw, from arming to
+    /// the last reading -- answered on the host clock where the readings carried one. That is
+    /// the number to show anybody, because it is the only one of the two that is in seconds.
+    /// </para>
+    /// <para>
+    /// The clock comes back with the number so that a caller cannot print one without the
+    /// other by accident, which is how the pen's counter reached six separate readouts.
+    /// <see cref="Timing.Said"/> renders the pair for a one-line readout.
+    /// </para>
+    /// </remarks>
+    public (double Seconds, Clock On) Lasted
+    {
+        get
+        {
+            if (_stamped && FirstArrived is { } arrived)
+            {
+                return ((LastArrived - arrived) / 1e6, Clock.Host);
+            }
+
+            // Nothing was routed through here, so this take was read back from a file rather
+            // than recorded. Its readings carry the clock instead.
+            if (Routed == 0)
+            {
+                var held = Timing.Spanned(Readings.Count > 0 ? Readings : Aloft);
+
+                if (held.On != Clock.None) return held;
+            }
+
+            return FirstSeen is { } seen
+                ? ((LastSeen - seen) / 1e6, Clock.Pen)
+                : (0, Clock.None);
+        }
+    }
 
     /// <summary>When the recording was stopped, or null while it is still going.</summary>
     public DateTimeOffset? StoppedAt { get; set; }
@@ -588,8 +655,12 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
             _ => $"{Strokes} strokes, {Count} readings",
         };
 
-        var over = Strokes == 0 ? Running : Milliseconds;
+        // One clock for both branches. This used to pick Running or Milliseconds by whether
+        // anything had touched down -- two different spans, and both of them the pen's counter
+        // presented as milliseconds, so the sentence read the same whichever it was.
+        var (seconds, on) = Lasted;
 
-        return $"{what} over {over:F0} ms through {Api}, full scale {FullScalePressure}";
+        return $"{what} over {Timing.Said(seconds, on)} through {Api}, "
+            + $"full scale {FullScalePressure}";
     }
 }

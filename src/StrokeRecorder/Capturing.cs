@@ -211,7 +211,7 @@ public sealed class Capturing
     /// <param name="overThePad">Whether it was over the part of the screen being recorded.</param>
     public Captured Took(Reading reading, bool overThePad)
     {
-        Take?.Routing(reading.At);
+        Take?.Routing(reading);
 
         var airborne = Disposition.ExcludedAirborne;
 

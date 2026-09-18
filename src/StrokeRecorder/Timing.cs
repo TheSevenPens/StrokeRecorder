@@ -80,10 +80,41 @@ public static class Timing
         var first = readings[0];
         var last = readings[^1];
 
+        // The ends of the list, and deliberately not the ends that carry a nonzero arrival.
+        // The format rebases arrivals so that the first one is zero, so a zero here is a real
+        // timestamp at the origin rather than a missing stamp, and skipping it would shorten
+        // every reopened take by its first batch. Whether the take carries host time at all
+        // is Available's question, asked once, above.
         return clock == Clock.Host
             ? ((last.Arrived - first.Arrived) / 1e6, Clock.Host)
             : ((last.At - first.At) / 1e6, Clock.Pen);
     }
+
+    /// <summary>
+    /// A duration in milliseconds, saying which clock it is on when that is not the host's.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For the one-line readouts. Where there is room to explain -- a finding, say -- write
+    /// the sentence out instead, as the pace finding does: a reader deciding whether a take
+    /// met a brief needs to know the number cannot answer that, not merely that it came from
+    /// somewhere else.
+    /// </para>
+    /// <para>
+    /// The qualifier is not decoration. An unqualified "820 ms" off the pen's counter is read
+    /// as eight tenths of a second, and on the hardware measured here it was half as long
+    /// again.
+    /// </para>
+    /// </remarks>
+    public static string Said((double Seconds, Clock On) span) => Said(span.Seconds, span.On);
+
+    /// <inheritdoc cref="Said((double, Clock))"/>
+    public static string Said(double seconds, Clock on) => on switch
+    {
+        Clock.Host => $"{seconds * 1000:F0} ms",
+        Clock.Pen => $"{seconds * 1000:F0} ms on the pen's counter",
+        _ => "an unrecorded length of time",
+    };
 
     /// <summary>
     /// Where each drained batch ends, as an index into the readings.
