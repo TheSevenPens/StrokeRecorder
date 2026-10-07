@@ -86,6 +86,52 @@ public class RoundTrip
         }
     }
 
+    /// <summary>That who made a take, what firmware it ran on, and the notes survive a round trip.</summary>
+    [Fact]
+    public void The_username_notes_and_firmware_survive_being_written_and_read()
+    {
+        var take = Made(withHostClock: true);
+        take.Username = "someone";
+        take.Notes = "Pen nib was new.\nSecond line.";
+        take.Firmware = "1.2.3";
+
+        var path = Written(take);
+
+        try
+        {
+            var back = Reopen.From(path);
+
+            Assert.True(back.Take is not null, $"could not be read back: {back.Why}");
+            Assert.Equal("someone", back.Take!.Username);
+            Assert.Equal("Pen nib was new.\nSecond line.", back.Take.Notes);
+            Assert.Equal("1.2.3", back.Take.Firmware);
+        }
+        finally
+        {
+            Clear(path);
+        }
+    }
+
+    /// <summary>That a recording from before these fields existed reads as having none.</summary>
+    [Fact]
+    public void A_take_written_without_them_reads_back_with_them_empty()
+    {
+        var path = Written(Made(withHostClock: true));
+
+        try
+        {
+            var back = Reopen.From(path);
+
+            Assert.Equal("", back.Take!.Username);
+            Assert.Equal("", back.Take.Notes);
+            Assert.Equal("", back.Take.Firmware);
+        }
+        finally
+        {
+            Clear(path);
+        }
+    }
+
     [Fact]
     public void A_take_with_no_host_clock_survives_being_written_and_read()
     {

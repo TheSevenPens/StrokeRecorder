@@ -97,6 +97,8 @@ public static class Trace
         json.WriteString(TraceFormat.Field.Id, Path.GetFileNameWithoutExtension(path));
         json.WriteString(TraceFormat.Field.Gesture, take.Gesture.Id);
         json.WriteString(TraceFormat.Field.Intent, take.Intent);
+        json.WriteString(TraceFormat.Field.Username, take.Username);
+        json.WriteString(TraceFormat.Field.Notes, take.Notes);
         json.WriteString(TraceFormat.Field.RecordedAt, take.At.ToString("O"));
         json.WriteString(TraceFormat.Field.EndedBy, take.EndedBy);
         json.WriteNumber(TraceFormat.Field.StrokeCount, take.Strokes);
@@ -123,6 +125,7 @@ public static class Trace
         json.WriteStartObject(TraceFormat.Field.Device);
         json.WriteString(TraceFormat.Field.Tablet, take.Tablet);
         json.WriteString(TraceFormat.Field.Driver, take.Driver);
+        json.WriteString(TraceFormat.Field.Firmware, take.Firmware);
         json.WriteString(TraceFormat.Field.Api, take.Api.ToString());
 
         // The number the readings do not carry and cannot. Without it every pressure below

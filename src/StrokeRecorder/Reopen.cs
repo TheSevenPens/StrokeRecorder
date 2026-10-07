@@ -23,7 +23,7 @@ namespace StrokeRecorder;
 /// <para>
 /// <b>Reads every version.</b> Version one put the readings at the top level with no strokes;
 /// two introduced the strokes array; three added height, four status, five the host clock and
-/// six the approach measured on it. A file that is missing a column gets the field's default,
+/// six the approach measured on it, seven the username, notes and firmware. A file that is missing a column gets the field's default,
 /// which is what a reader of an old trace should get: the absence is real.
 /// </para>
 /// </remarks>
@@ -73,8 +73,11 @@ public static class Reopen
                     : DateTimeOffset.Now,
                 Tablet = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Tablet),
                 Driver = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Driver),
+                Firmware = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Firmware),
                 Conventions = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Conventions),
                 Intent = Text(root, TraceFormat.Field.Intent),
+                Username = Text(root, TraceFormat.Field.Username),
+                Notes = Text(root, TraceFormat.Field.Notes),
                 EndedBy = Text(root, TraceFormat.Field.EndedBy),
             };
 

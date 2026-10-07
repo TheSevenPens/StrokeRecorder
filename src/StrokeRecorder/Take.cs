@@ -619,6 +619,15 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
 
     public string Driver { get; set; } = "";
 
+    /// <summary>The tablet's firmware, typed in for the same reason the driver is.</summary>
+    public string Firmware { get; set; } = "";
+
+    /// <summary>Who made the recording, as they chose to put it.</summary>
+    public string Username { get; set; } = "";
+
+    /// <summary>Anything the person wanted to say about this recording that the rest of it cannot.</summary>
+    public string Notes { get; set; } = "";
+
     /// <summary>What the hand was asked to do. Starts as the gesture's, and can be edited.</summary>
     public string Intent { get; set; } = gesture.Intent;
 
