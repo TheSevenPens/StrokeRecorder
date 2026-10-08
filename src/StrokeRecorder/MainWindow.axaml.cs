@@ -134,6 +134,15 @@ public partial class MainWindow : Window
     /// needs to know which kind of number they are looking at, and the two look identical.
     /// </remarks>
     private readonly Readout _range = new("max pressure level");
+
+    /// <summary>
+    /// How big the tablet is, as the driver states it.
+    /// </summary>
+    /// <remarks>
+    /// Wintab only. The pointer backends say "not reported" rather than a blank, because a blank
+    /// reads as a reading that has not arrived yet and this one never will.
+    /// </remarks>
+    private readonly Readout _area = new("active area");
     private readonly Readout _tiltX = new("tilt x");
     private readonly Readout _tiltY = new("tilt y");
     /// <summary>
@@ -928,7 +937,11 @@ public partial class MainWindow : Window
 
     /// <summary>What a session says about itself, in the capture's terms.</summary>
     private static Capturing.Device Speaking(IPenSession session) =>
-        new(session.Api, session.MaxPressure, session.Conventions.ToString() ?? "");
+        new(
+            session.Api,
+            session.MaxPressure,
+            session.Conventions.ToString() ?? "",
+            session.PhysicalArea is { } area ? ActiveArea.From(area) : null);
 
     /// <summary>Does whatever the capture asked the window for.</summary>
     private void Apply(Captured what)
@@ -1549,6 +1562,10 @@ public partial class MainWindow : Window
            scale            {take.Placed.ScaleX:F6}, {take.Placed.ScaleY:F6}
            origin           {take.Placed.OriginX:F3}, {take.Placed.OriginY:F3}
 
+         coordinates        desktop
+           tablet           {(take.ActiveArea is { } area ? area.Describe() : "(size not reported)")}
+           mm per pixel     {(take.ActiveArea is { } scale ? $"{scale.MmPerPixelX:F5} across, {scale.MmPerPixelY:F5} down" : "(not reported)")}
+
          columns            {string.Join(", ", Trace.Columns)}
          strokes            {take.Strokes}{Spread(take)}
          readings           {take.Count} over {Timing.Said(Timing.Spanned(take.Readings))}, {take.Polls} polls
@@ -1643,7 +1660,7 @@ public partial class MainWindow : Window
     /// show that something is arriving.
     /// </para>
     /// </remarks>
-    private Readout[] All => [_range, _pressure, _tiltX, _tiltY, _rate, _batch];
+    private Readout[] All => [_range, _area, _pressure, _tiltX, _tiltY, _rate, _batch];
 
     /// <summary>
     /// Where every reading of the take ended up, as a column of counts.
@@ -2271,6 +2288,7 @@ public partial class MainWindow : Window
         _api.Set(session.Api.ToString());
         _range.Set(session.MaxPressure.ToString());
         _range.Relabel($"max pressure level ({Sounds(session.Api)})");
+        _area.Set(session.PhysicalArea is { } size ? ActiveArea.From(size).Describe() : "not reported");
 
         Say("Waiting for the pen.", Plainly(session.Conventions.ToString() ?? ""));
 

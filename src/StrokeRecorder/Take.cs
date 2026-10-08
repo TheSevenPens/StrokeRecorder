@@ -634,6 +634,16 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
     /// <summary>What the backend normalises and what it leaves alone.</summary>
     public string Conventions { get; set; } = "";
 
+    /// <summary>
+    /// How big the tablet is and what a desktop pixel of a reading covers on it, or null where
+    /// the backend could not say.
+    /// </summary>
+    /// <remarks>
+    /// Null is an ordinary answer and not a fault: only the Wintab backends can be asked, and a
+    /// recording from before version eight did not ask. It is never filled with a guess.
+    /// </remarks>
+    public ActiveArea? ActiveArea { get; set; }
+
     public bool Named => Tablet.Length > 0 && Driver.Length > 0;
 
     /// <summary>
