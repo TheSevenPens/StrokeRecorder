@@ -55,6 +55,7 @@ public static class Findings
         Orientation(found, take);
         NearVertical(found, take);
         Pace(found, take);
+        Distance(found, take);
 
         Named(found, take);
 
@@ -737,6 +738,57 @@ public static class Findings
             + "azimuth starts making occasional large jumps -- 45 degrees at a lean of one, "
             + "measured -- and a nib driven from it jumps with them. Where in the stroke it "
             + "happened matters as much as how much: at the ends is where a taper is."));
+    }
+
+    /// <summary>
+    /// How far the strokes went in millimetres and how fast, where the tablet's size is known.
+    /// </summary>
+    /// <remarks>
+    /// Said either way. A recording that cannot be measured in millimetres is told so, with the
+    /// reason, because a page of pixel counts that never mentions it could be read as distances
+    /// and compared with another tablet's.
+    /// </remarks>
+    private static void Distance(List<Finding> found, Take take)
+    {
+        if (take.Count == 0) return;
+
+        if (take.ActiveArea is not { } area)
+        {
+            found.Add(new(Tone.Plain, "Lengths here are in pixels, not millimetres",
+                "This recording does not say how big the tablet was, so a stroke's length is a "
+                + "pixel count and cannot be compared with another tablet's, or with this one "
+                + "mapped differently. A backend that can ask the driver says; "
+                + "recordings made before the size was recorded cannot be corrected."));
+
+            return;
+        }
+
+        var strokes = Distances.Of(take, area);
+
+        if (strokes.Count == 0) return;
+
+        var paths = strokes.Select(stroke => stroke.PathMm).ToList();
+        var chords = strokes.Select(stroke => stroke.ChordMm).ToList();
+        var speeds = strokes.Select(stroke => stroke.MmPerSecond).OfType<double>().ToList();
+
+        var title = strokes.Count == 1
+            ? $"{paths[0]:F0} mm of path, {chords[0]:F0} mm end to end"
+            : $"{strokes.Count} strokes, {paths.Min():F0} to {paths.Max():F0} mm of path";
+
+        var pace = speeds.Count == 0
+            ? "No speed: this recording has no host clock to divide by, and the pen's own "
+              + "timestamp is a packet counter rather than a clock."
+            : speeds.Count == 1
+                ? $"Average speed {speeds[0]:F0} mm/s on the host clock."
+                : $"Average speeds {speeds.Min():F0} to {speeds.Max():F0} mm/s on the host clock.";
+
+        found.Add(new(Tone.Plain, title,
+            $"On a tablet {area.Describe()}, scaled by {area.MmPerPixelX:F4} mm a pixel across "
+            + $"and {area.MmPerPixelY:F4} down. {pace} The path is every step added up, and a "
+            + "noisy digitizer over-counts it, so it is an upper bound on what the hand did; "
+            + "the end-to-end distance cannot be lengthened by jitter but undercounts a curve. "
+            + "Both are only as good as the positions: a driver that places the pen wrongly "
+            + "has its distances wrong by the same factor."));
     }
 
     /// <summary>The take against the brief it was drawn to, rather than against nothing.</summary>
