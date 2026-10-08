@@ -935,6 +935,24 @@ public partial class MainWindow : Window
         Apply(_capturing.Arm(Counts(_pen.Session)));
     }
 
+    /// <summary>Whether the readout has been given a size, as opposed to "not reported".</summary>
+    private bool _areaShown;
+
+    /// <summary>Shows the tablet's size, and says whether the session had one to show.</summary>
+    private bool ShowArea(IPenSession session)
+    {
+        if (session.PhysicalArea is { } size)
+        {
+            _area.Set(ActiveArea.From(size).Describe());
+
+            return true;
+        }
+
+        _area.Set("not reported");
+
+        return false;
+    }
+
     /// <summary>What a session says about itself, in the capture's terms.</summary>
     private static Capturing.Device Speaking(IPenSession session) =>
         new(
@@ -2288,7 +2306,7 @@ public partial class MainWindow : Window
         _api.Set(session.Api.ToString());
         _range.Set(session.MaxPressure.ToString());
         _range.Relabel($"max pressure level ({Sounds(session.Api)})");
-        _area.Set(session.PhysicalArea is { } size ? ActiveArea.From(size).Describe() : "not reported");
+        _areaShown = ShowArea(session);
 
         Say("Waiting for the pen.", Plainly(session.Conventions.ToString() ?? ""));
 
@@ -2320,6 +2338,11 @@ public partial class MainWindow : Window
         _batch.Saw(batch.Count);
 
         if (batch.Count == 0) return;
+
+        // The WM_POINTER session cannot say how big the tablet is until it has seen the pen,
+        // which is now. Asked again on each batch until it can, so the readout does not say
+        // "not reported" for the rest of a session that has since found out.
+        if (!_areaShown) _areaShown = ShowArea(session);
 
         _seen += batch.Count;
 
