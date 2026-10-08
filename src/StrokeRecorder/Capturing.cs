@@ -87,7 +87,8 @@ public sealed class Capturing
     public const long HoverKept = 250_000;
 
     /// <summary>What the session says about itself, which a take records.</summary>
-    public readonly record struct Device(InputApi Api, int MaxPressure, string Conventions);
+    public readonly record struct Device(
+        InputApi Api, int MaxPressure, string Conventions, ActiveArea? Area = null);
 
     private readonly Func<InkTransform> _placement;
 
@@ -355,6 +356,7 @@ public sealed class Capturing
     private Take Fresh() => new(_gesture!, _device.Api, _device.MaxPressure, _placement())
     {
         Conventions = _device.Conventions,
+        ActiveArea = _device.Area,
     };
 
     /// <summary>Begins again, for a single-stroke gesture drawn a second time.</summary>

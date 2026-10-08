@@ -35,6 +35,9 @@ public static class Trace
     /// <inheritdoc cref="TraceFormat.Version"/>
     public const int Version = TraceFormat.Version;
 
+    /// <summary>What x and y are, in words, in both the placement and the coordinates.</summary>
+    private const string DesktopUnits = "desktop physical pixels, as reported by the session";
+
     /// <inheritdoc cref="TraceFormat.Names"/>
     public static IReadOnlyList<string> Columns => TraceFormat.Names;
 
@@ -132,18 +135,43 @@ public static class Trace
         // is an integer with no meaning.
         json.WriteNumber(TraceFormat.Field.FullScalePressure, take.FullScalePressure);
         json.WriteString(TraceFormat.Field.Conventions, take.Conventions);
+
         json.WriteEndObject();
 
         // What x and y are, which is not a surface pixel. They are desktop pixels as
         // reported, and this is the transform that was frozen when the tip went down.
         json.WriteStartObject(TraceFormat.Field.Placement);
-        json.WriteString(TraceFormat.Field.Units, "desktop physical pixels, as reported by the session");
+        json.WriteString(TraceFormat.Field.Units, DesktopUnits);
         json.WriteString(TraceFormat.Field.Note,
             "multiply by scale and add origin, per axis, for the surface pixel this was drawn at");
         json.WriteNumber(TraceFormat.Field.ScaleX, take.Placed.ScaleX);
         json.WriteNumber(TraceFormat.Field.ScaleY, take.Placed.ScaleY);
         json.WriteNumber(TraceFormat.Field.OriginX, take.Placed.OriginX);
         json.WriteNumber(TraceFormat.Field.OriginY, take.Placed.OriginY);
+        json.WriteEndObject();
+
+        // What x and y are, said in the form the format gives it. Always the desktop form: this
+        // records desktop positions, whatever the backend, and the tablet form is for a tool that
+        // reads the device's own counts.
+        //
+        // The physical size is absent where the backend could not be asked -- every one but the
+        // two Wintab ones -- because a size of zero would be a claim. Millimetres to the
+        // micrometre, and the per-pixel scales to six places, which is finer than a tablet's own
+        // resolution, so rounding here costs nothing a reader could have used.
+        json.WriteStartObject(TraceFormat.Field.Coordinates);
+        json.WriteString(TraceFormat.Field.Space, TraceFormat.CoordinateSpace.Desktop);
+        json.WriteString(TraceFormat.Field.Units, DesktopUnits);
+
+        if (take.ActiveArea is { } area)
+        {
+            json.WriteNumber(TraceFormat.Field.WidthMm, Math.Round(area.WidthMm, 3));
+            json.WriteNumber(TraceFormat.Field.HeightMm, Math.Round(area.HeightMm, 3));
+            json.WriteNumber(TraceFormat.Field.MappedWidthMm, Math.Round(area.MappedWidthMm, 3));
+            json.WriteNumber(TraceFormat.Field.MappedHeightMm, Math.Round(area.MappedHeightMm, 3));
+            json.WriteNumber(TraceFormat.Field.MmPerPixelX, Math.Round(area.MmPerPixelX, 6));
+            json.WriteNumber(TraceFormat.Field.MmPerPixelY, Math.Round(area.MmPerPixelY, 6));
+        }
+
         json.WriteEndObject();
 
         json.WriteString(TraceFormat.Field.Clocks, TraceFormat.Clocks);

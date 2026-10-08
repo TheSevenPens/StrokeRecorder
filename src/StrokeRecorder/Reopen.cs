@@ -53,6 +53,16 @@ public static class Reopen
                 return new(null, "The columns do not carry a position and a pressure.");
             }
 
+            // Counts are not pixels. A recording in the device's own counts, from a tool that
+            // reads the driver directly, has no desktop and no placement; opened here its counts
+            // would be drawn as pixels, and look like a stroke until somebody measured it.
+            if (Space(root) != TraceFormat.CoordinateSpace.Desktop)
+            {
+                return new(null, "This recording is in the tablet's own digitizer counts, made by a tool "
+                    + "that reads the device directly. This recorder replays desktop positions and "
+                    + "cannot show it.");
+            }
+
             var gestureId = Text(root, TraceFormat.Field.Gesture);
             var gesture = Gestures.All.FirstOrDefault(each => each.Id == gestureId)
                           ?? Gestures.All[0];
@@ -75,6 +85,7 @@ public static class Reopen
                 Driver = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Driver),
                 Firmware = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Firmware),
                 Conventions = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Conventions),
+                ActiveArea = Area(root),
                 Intent = Text(root, TraceFormat.Field.Intent),
                 Username = Text(root, TraceFormat.Field.Username),
                 Notes = Text(root, TraceFormat.Field.Notes),
@@ -152,6 +163,51 @@ public static class Reopen
         {
             return new(null, bad.Message);
         }
+    }
+
+    /// <summary>
+    /// What <c>coordinates.space</c> says, where the file has one. A file before version eight
+    /// has none and its positions are the desktop's, which is not the same as unknown.
+    /// </summary>
+    private static string Space(JsonElement root) =>
+        Text(root, TraceFormat.Field.Coordinates, TraceFormat.Field.Space) is { Length: > 0 } named
+            ? named
+            : TraceFormat.CoordinateSpace.Desktop;
+
+    /// <summary>
+    /// The tablet's size and scale, where a desktop recording states them. Null for a file that
+    /// does not, which is every file before version eight and every one from a backend that
+    /// could not be asked -- and not a tablet of no size.
+    /// </summary>
+    /// <remarks>
+    /// All six or none. A file that names the surface but gives no scale cannot turn a pixel into
+    /// a distance, and an area with a zero scale would read as a claim, so it is not one.
+    /// </remarks>
+    private static ActiveArea? Area(JsonElement root)
+    {
+        if (!root.TryGetProperty(TraceFormat.Field.Coordinates, out var area)
+            || area.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var scale = (X: Number(area, TraceFormat.Field.MmPerPixelX), Y: Number(area, TraceFormat.Field.MmPerPixelY));
+        var (width, height) = (Number(area, TraceFormat.Field.WidthMm), Number(area, TraceFormat.Field.HeightMm));
+
+        if (scale.X <= 0 || scale.Y <= 0 || width <= 0 || height <= 0) return null;
+
+        // The mapped part defaults to the whole where a file leaves it out, which is what the
+        // format says the mapping is unless somebody chose another.
+        var mappedWidth = Number(area, TraceFormat.Field.MappedWidthMm);
+        var mappedHeight = Number(area, TraceFormat.Field.MappedHeightMm);
+
+        return new ActiveArea(
+            width,
+            height,
+            mappedWidth > 0 ? mappedWidth : width,
+            mappedHeight > 0 ? mappedHeight : height,
+            scale.X,
+            scale.Y);
     }
 
     private static InkTransform Placement(JsonElement root)

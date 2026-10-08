@@ -25,7 +25,7 @@ Five steps, in one window.
 
 ## The trace format
 
-Each recording is one JSON file, `stroke-field-guide/take`, currently version 7. The format is
+Each recording is one JSON file, `stroke-field-guide/take`, currently version 8, which also says what `x` and `y` are and, on Wintab, how big the tablet is in millimetres. The format is
 documented in StrokeCorpus:
 [FORMAT.md](https://github.com/TheSevenPens/StrokeCorpus/blob/main/FORMAT.md) (also at
 [`corpus/FORMAT.md`](corpus/FORMAT.md) in a recursive clone). It covers the fields, the
