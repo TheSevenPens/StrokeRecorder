@@ -316,6 +316,81 @@ public class CaptureTests
         Assert.Single(capturing.Take.Contacts[1].Approach);
     }
 
+    // ---- how long ago the pen was last seen ---------------------------------
+
+    /// <remarks>
+    /// <c>#9</c>. The hover buffer only keeps readings that <em>moved</em>, so measuring from it said
+    /// that a pen resting in range had last been seen when it last moved. Hover at 0 and again at one
+    /// second, then contact a millisecond later, was written as 1,001 ms. It was seen 1 ms before.
+    /// Which readings are kept as the approach is unchanged: this is only the interval.
+    /// </remarks>
+    [Fact]
+    public void A_hover_that_did_not_move_still_counts_as_the_pen_being_seen()
+    {
+        var capturing = Ready();
+
+        capturing.Arm(null);
+
+        capturing.Took(Above(5, 0), true);
+        capturing.Took(Above(5, 1_000_000), true);   // the same place: not kept as hover
+        capturing.Took(Down(5, 1_001_000), true);
+
+        var contact = capturing.Take!.Contacts[0];
+
+        Assert.Equal(1_000, contact.SinceLastSeen);
+        Assert.Equal(1_000_000, contact.LastAirborne!.Value.Arrived);
+
+        // Unchanged: the window is a quarter second, so the reading at 0 is too old and the one
+        // that did not move was never kept.
+        Assert.Empty(contact.Approach);
+    }
+
+    [Fact]
+    public void How_long_ago_the_pen_was_last_seen_is_measured_from_the_most_recent_airborne_reading()
+    {
+        var capturing = Ready();
+
+        capturing.Arm(null);
+
+        capturing.Took(Above(5, 0), true);
+        capturing.Took(Above(9, 100_000), true);     // moved, and kept
+        capturing.Took(Above(9, 400_000), true);     // did not move, and was not
+        capturing.Took(Down(9, 410_000), true);
+
+        Assert.Equal(10_000, capturing.Take!.Contacts[0].SinceLastSeen);
+    }
+
+    [Fact]
+    public void A_landing_with_nothing_airborne_before_it_says_the_pen_was_not_seen()
+    {
+        var capturing = Ready();
+
+        capturing.Arm(null);
+        capturing.Took(Down(5, Tick), true);
+
+        var contact = capturing.Take!.Contacts[0];
+
+        Assert.Null(contact.SinceLastSeen);
+        Assert.Null(contact.LastAirborne);
+    }
+
+    [Fact]
+    public void The_interval_for_one_stroke_does_not_leak_into_the_next()
+    {
+        var capturing = Ready();
+
+        capturing.Arm(null);
+
+        capturing.Took(Above(5, 0), true);
+        capturing.Took(Down(5, 10_000), true);
+        capturing.Took(Above(5, 20_000), true);      // the lift
+        capturing.Took(Above(5, 900_000), true);     // resting, not kept
+        capturing.Took(Down(5, 905_000), true);
+
+        Assert.Equal(10_000, capturing.Take!.Contacts[0].SinceLastSeen);
+        Assert.Equal(5_000, capturing.Take.Contacts[1].SinceLastSeen);
+    }
+
     // ---- accounting ---------------------------------------------------------
 
     [Fact]

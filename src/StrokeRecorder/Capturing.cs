@@ -94,6 +94,13 @@ public sealed class Capturing
     private readonly List<Reading> _hover = [];
     private readonly List<Reading> _aloft = [];
 
+    /// <summary>
+    /// The latest reading of the pen in the air, whether or not <see cref="Moved"/> let it into
+    /// <see cref="_hover"/>. Separate because the two answer different questions: the buffer is
+    /// what to keep as an approach, and this is when the pen was last seen.
+    /// </summary>
+    private Reading? _lastAirborne;
+
     private Gesture? _gesture;
     private Device _device;
 
@@ -141,6 +148,7 @@ public sealed class Capturing
         }
 
         _hover.Clear();
+        _lastAirborne = null;
         _aloft.Clear();
 
         return new(Disposition.Unarmed, Restage: true, Wipe: true, Forget: true);
@@ -189,6 +197,7 @@ public sealed class Capturing
         State = Capture.Taken;
 
         _hover.Clear();
+        _lastAirborne = null;
         _aloft.Clear();
     }
 
@@ -199,6 +208,7 @@ public sealed class Capturing
         State = Capture.Idle;
 
         _hover.Clear();
+        _lastAirborne = null;
         _aloft.Clear();
 
         return new(Disposition.Unarmed, Restage: true, Wipe: true, Forget: true);
@@ -231,6 +241,9 @@ public sealed class Capturing
                 // disposition; it is not the same as missing.
                 Take?.OneLeftOut();
             }
+
+            // Before the movement filter: a pen resting in range is still being seen.
+            _lastAirborne = reading;
 
             if (Moved(reading)) Hovering(reading);
         }
@@ -401,10 +414,15 @@ public sealed class Capturing
     {
         var approach = _hover.Where(seen => landing.Arrived - seen.Arrived <= HoverKept).ToList();
 
-        var since = _hover.Count > 0 ? landing.Arrived - _hover[^1].Arrived : (long?)null;
-        var last = _hover.Count > 0 ? _hover[^1] : (Reading?)null;
+        // From the last airborne reading of any kind, not the last one that moved. Measured from the
+        // buffer, a pen resting in range before it landed reported the time since it last moved:
+        // hover at 0 ms, the same hover at 1000 ms and contact at 1001 ms came out as 1001 ms
+        // where the pen had been seen 1 ms before (#9).
+        var since = _lastAirborne is { } seen ? landing.Arrived - seen.Arrived : (long?)null;
+        var last = _lastAirborne;
 
         _hover.Clear();
+        _lastAirborne = null;
 
         return (approach, since, last);
     }
