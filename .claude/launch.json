@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "corpus-site",
+      "runtimeExecutable": "C:\\Users\\seven\\micromamba\\envs\\node1\\python.exe",
+      "runtimeArgs": ["-m", "http.server", "8000", "--bind", "127.0.0.1", "--directory", "corpus"],
+      "port": 8000
+    }
+  ]
+}
