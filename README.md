@@ -23,6 +23,17 @@ Five steps, in one window.
    and a ledger that has to balance.
 5. **Save.** Named, and written as a trace.
 
+## The trace format
+
+Each recording is one JSON file, `stroke-field-guide/take`, currently version 7. The format is
+documented in StrokeCorpus:
+[FORMAT.md](https://github.com/TheSevenPens/StrokeCorpus/blob/main/FORMAT.md) (also at
+[`corpus/FORMAT.md`](corpus/FORMAT.md) in a recursive clone). It covers the fields, the
+columns, the version history, and what a reader must not assume.
+
+The code that defines it, and that the writer and both readers share, is
+[`TraceFormat.cs`](vendor/StrokeKit/src/StrokeKit/Strokes/TraceFormat.cs) in StrokeKit.
+
 ## Why the backend is a choice rather than a setting
 
 The same hand on the same tablet reports different numbers through different APIs, and a

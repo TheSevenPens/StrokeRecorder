@@ -300,8 +300,23 @@
           </StackPanel>
 
           <StackPanel Spacing="4">
+            <TextBlock Text="Firmware" Classes="label" />
+            <TextBox Name="Firmware" Watermark="1.2.3" />
+          </StackPanel>
+
+          <StackPanel Spacing="4">
+            <TextBlock Text="Username" Classes="label" />
+            <TextBox Name="Username" />
+          </StackPanel>
+
+          <StackPanel Spacing="4">
             <TextBlock Text="What the hand was asked to do" Classes="label" />
             <TextBox Name="Intent" AcceptsReturn="True" TextWrapping="Wrap" Height="76" />
+          </StackPanel>
+
+          <StackPanel Spacing="4">
+            <TextBlock Text="Notes" Classes="label" />
+            <TextBox Name="Notes" AcceptsReturn="True" TextWrapping="Wrap" Height="76" />
           </StackPanel>
 
           <StackPanel Spacing="4">

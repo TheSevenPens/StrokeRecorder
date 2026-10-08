@@ -421,7 +421,7 @@ public partial class MainWindow : Window
 
         this.FindControl<TextBox>("FileName")!.TextChanged += (_, _) => Foot();
 
-        foreach (var box in new[] { "Tablet", "Driver", "Intent" })
+        foreach (var box in new[] { "Tablet", "Driver", "Firmware", "Username", "Intent", "Notes" })
         {
             this.FindControl<TextBox>(box)!.TextChanged += (_, _) => Named();
         }
@@ -1408,14 +1408,23 @@ public partial class MainWindow : Window
         _saved = null;
         _suggested = "";
 
+        // Read off the take before any box is set: setting one raises Named(), which copies
+        // every box back onto the take, so the ones not yet set would overwrite these with
+        // whatever the last take left in them.
+        var tablet = _take.Tablet.Length > 0 ? _take.Tablet : _remembered.Tablet;
+        var driver = _take.Driver.Length > 0 ? _take.Driver : _remembered.Driver;
+        var firmware = _take.Firmware.Length > 0 ? _take.Firmware : _remembered.Firmware;
+        var username = _take.Username.Length > 0 ? _take.Username : _remembered.Username;
+        var intent = _take.Intent;
+        var notes = _take.Notes;
+
         this.FindControl<TextBox>("FileName")!.Text = "";
-        this.FindControl<TextBox>("Tablet")!.Text = _take.Tablet.Length > 0
-            ? _take.Tablet : _remembered.Tablet;
-
-        this.FindControl<TextBox>("Driver")!.Text = _take.Driver.Length > 0
-            ? _take.Driver : _remembered.Driver;
-
-        this.FindControl<TextBox>("Intent")!.Text = _take.Intent;
+        this.FindControl<TextBox>("Tablet")!.Text = tablet;
+        this.FindControl<TextBox>("Driver")!.Text = driver;
+        this.FindControl<TextBox>("Firmware")!.Text = firmware;
+        this.FindControl<TextBox>("Username")!.Text = username;
+        this.FindControl<TextBox>("Intent")!.Text = intent;
+        this.FindControl<TextBox>("Notes")!.Text = notes;
         this.FindControl<TextBlock>("Folder")!.Text = TakesFolder;
 
         Named();
@@ -1483,7 +1492,10 @@ public partial class MainWindow : Window
 
         _take.Tablet = this.FindControl<TextBox>("Tablet")!.Text?.Trim() ?? "";
         _take.Driver = this.FindControl<TextBox>("Driver")!.Text?.Trim() ?? "";
+        _take.Firmware = this.FindControl<TextBox>("Firmware")!.Text?.Trim() ?? "";
+        _take.Username = this.FindControl<TextBox>("Username")!.Text?.Trim() ?? "";
         _take.Intent = this.FindControl<TextBox>("Intent")!.Text?.Trim() ?? "";
+        _take.Notes = this.FindControl<TextBox>("Notes")!.Text?.Trim() ?? "";
 
         var box = this.FindControl<TextBox>("FileName")!;
 
@@ -1520,12 +1532,15 @@ public partial class MainWindow : Window
          format             {Trace.Format} v{Trace.Version}
          gesture            {take.Gesture.Id}
          intent             {(take.Intent.Length == 0 ? "(none)" : take.Intent)}
+         username           {(take.Username.Length == 0 ? "(none)" : take.Username)}
+         notes              {(take.Notes.Length == 0 ? "(none)" : take.Notes)}
          recordedAt         {take.At:O}
          endedBy            {take.EndedBy}
 
          device
            tablet           {(take.Tablet.Length == 0 ? "(not named)" : take.Tablet)}
            driver           {(take.Driver.Length == 0 ? "(not named)" : take.Driver)}
+           firmware         {(take.Firmware.Length == 0 ? "(none)" : take.Firmware)}
            api              {take.Api}
            fullScalePressure{take.FullScalePressure,6}
            conventions      {take.Conventions}
@@ -1561,7 +1576,13 @@ public partial class MainWindow : Window
 
             // Kept only once a take has been written with them, so a half-typed name in an
             // abandoned session is not what the next launch offers.
-            _remembered = _remembered with { Tablet = _take.Tablet, Driver = _take.Driver };
+            _remembered = _remembered with
+            {
+                Tablet = _take.Tablet,
+                Driver = _take.Driver,
+                Firmware = _take.Firmware,
+                Username = _take.Username,
+            };
             _remembered.Write();
 
             Wrote(_take.Named
