@@ -42,6 +42,25 @@ sessions ask the device its pressure range; the pointer sessions declare a fixed
 the API's range rather than anything the hardware was asked about. That difference is not
 cosmetic and it is recorded in every trace.
 
+## What the positions mean
+
+`x` and `y` are desktop pixels, and where the backend can ask the driver, the trace also says how
+many millimetres a pixel is on each axis and how big the tablet is. Two things about that are easy
+to get wrong, and both have been, once:
+
+- **The size is the driver's claim, not a measurement.** Nothing here has checked it against a
+  ruler. And the *mapped* figures are the context's rectangles: a driver that crops the tablet to
+  one display delivers only part of it while they still describe all of it. The millimetres a pixel
+  stay right; the extent may not.
+- **The recorder cannot show you a tablet's edges.** It keeps only readings over its pad, which is a
+  part of the screen, so the corners are unreachable ([#16](https://github.com/TheSevenPens/StrokeRecorder/issues/16)).
+
+To find out what a given tablet's coordinates really are, use the sweep probe that ships with
+WinPenKit, which compares the pen's whole range with the cursor in the tablet's own counts, and read
+its notes first: [`Docs/PEN-SWEEP.md`](https://github.com/TheSevenPens/WinPenKit/blob/main/Docs/PEN-SWEEP.md).
+They include how a probe that was not per-monitor DPI aware produced a convincing wrong answer about
+this very question.
+
 ## The two clocks
 
 Every reading carries two timestamps and they measure different things.
