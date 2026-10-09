@@ -301,6 +301,11 @@
           </StackPanel>
 
           <StackPanel Spacing="4">
+            <TextBlock Text="Pen" Classes="label" />
+            <TextBox Name="PenModel" Watermark="ACP-700" />
+          </StackPanel>
+
+          <StackPanel Spacing="4">
             <TextBlock Text="Driver" Classes="label" />
             <TextBox Name="Driver" Watermark="Wacom driver 6.4.14-1" />
           </StackPanel>

@@ -430,7 +430,7 @@ public partial class MainWindow : Window
 
         this.FindControl<TextBox>("FileName")!.TextChanged += (_, _) => Foot();
 
-        foreach (var box in new[] { "RecordingName", "Tablet", "Driver", "Firmware", "Username", "Intent", "Notes" })
+        foreach (var box in new[] { "RecordingName", "Tablet", "PenModel", "Driver", "Firmware", "Username", "Intent", "Notes" })
         {
             this.FindControl<TextBox>(box)!.TextChanged += (_, _) => Named();
         }
@@ -1445,6 +1445,7 @@ public partial class MainWindow : Window
         var tablet = _take.Tablet.Length > 0 ? _take.Tablet : _remembered.Tablet;
         var driver = _take.Driver.Length > 0 ? _take.Driver : _remembered.Driver;
         var firmware = _take.Firmware.Length > 0 ? _take.Firmware : _remembered.Firmware;
+        var pen = _take.Pen.Length > 0 ? _take.Pen : _remembered.Pen;
         var username = _take.Username.Length > 0 ? _take.Username : _remembered.Username;
         var intent = _take.Intent;
         var notes = _take.Notes;
@@ -1454,6 +1455,7 @@ public partial class MainWindow : Window
         this.FindControl<TextBox>("Tablet")!.Text = tablet;
         this.FindControl<TextBox>("Driver")!.Text = driver;
         this.FindControl<TextBox>("Firmware")!.Text = firmware;
+        this.FindControl<TextBox>("PenModel")!.Text = pen;
         this.FindControl<TextBox>("Username")!.Text = username;
         this.FindControl<TextBox>("Intent")!.Text = intent;
         this.FindControl<TextBox>("Notes")!.Text = notes;
@@ -1527,6 +1529,7 @@ public partial class MainWindow : Window
         _take.Tablet = this.FindControl<TextBox>("Tablet")!.Text?.Trim() ?? "";
         _take.Driver = this.FindControl<TextBox>("Driver")!.Text?.Trim() ?? "";
         _take.Firmware = this.FindControl<TextBox>("Firmware")!.Text?.Trim() ?? "";
+        _take.Pen = this.FindControl<TextBox>("PenModel")!.Text?.Trim() ?? "";
         _take.Username = this.FindControl<TextBox>("Username")!.Text?.Trim() ?? "";
         _take.Intent = this.FindControl<TextBox>("Intent")!.Text?.Trim() ?? "";
         _take.Notes = this.FindControl<TextBox>("Notes")!.Text?.Trim() ?? "";
@@ -1576,6 +1579,7 @@ public partial class MainWindow : Window
            tablet           {(take.Tablet.Length == 0 ? "(not named)" : take.Tablet)}
            driver           {(take.Driver.Length == 0 ? "(not named)" : take.Driver)}
            firmware         {(take.Firmware.Length == 0 ? "(none)" : take.Firmware)}
+           pen              {(take.Pen.Length == 0 ? "(none)" : take.Pen)}
            api              {take.Api}
            fullScalePressure{take.FullScalePressure,6}
            conventions      {take.Conventions}
@@ -1620,6 +1624,7 @@ public partial class MainWindow : Window
                 Tablet = _take.Tablet,
                 Driver = _take.Driver,
                 Firmware = _take.Firmware,
+                Pen = _take.Pen,
                 Username = _take.Username,
             };
             _remembered.Write();
