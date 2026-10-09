@@ -628,6 +628,15 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
     /// <summary>Anything the person wanted to say about this recording that the rest of it cannot.</summary>
     public string Notes { get; set; } = "";
 
+    /// <summary>What the person who made the recording calls it, or empty if they did not say.</summary>
+    /// <remarks>
+    /// Written to the file only when it says something. Unlike every other field of a recording it
+    /// is a label and not evidence, so it may be added or changed in the file later without the
+    /// recording counting as edited. Empty means unnamed, and the corpus then works a name out from
+    /// the file name.
+    /// </remarks>
+    public string Name { get; set; } = "";
+
     /// <summary>What the hand was asked to do. Starts as the gesture's, and can be edited.</summary>
     public string Intent { get; set; } = gesture.Intent;
 

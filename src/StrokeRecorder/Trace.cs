@@ -98,6 +98,12 @@ public static class Trace
         json.WriteString(TraceFormat.Field.Format, Format);
         json.WriteNumber(TraceFormat.Field.Version, Version);
         json.WriteString(TraceFormat.Field.Id, Path.GetFileNameWithoutExtension(path));
+
+        // Straight after the id, and only when somebody named the take. The name is the one line of a
+        // recording that may later be added or changed, and the corpus checks that a change touches
+        // only that line -- so it is written where adding one afterwards would change nothing else, in
+        // the position that gives a trailing comma, rather than being last and altering the line before.
+        if (take.Name.Length > 0) json.WriteString(TraceFormat.Field.Name, take.Name);
         json.WriteString(TraceFormat.Field.Gesture, take.Gesture.Id);
         json.WriteString(TraceFormat.Field.Intent, take.Intent);
         json.WriteString(TraceFormat.Field.Username, take.Username);
@@ -322,11 +328,21 @@ public static class Trace
     /// The tablet is in the name because the commonest thing anybody does with a folder of
     /// these is compare two devices, and a folder where that needs opening each file is a
     /// folder nobody compares anything in.
+    /// <para>
+    /// <b>A name leads when there is one.</b> The gesture is the mode, and twenty-one of the first
+    /// thirty-three recordings were called "multi stroke" for it; what somebody called the take is
+    /// what a folder of them is browsed by. It falls back to the gesture when the name has nothing a
+    /// file name can keep.
+    /// </para>
     /// </remarks>
-    public static string Suggest(Gesture gesture, string tablet, DateTimeOffset at) =>
-        string.Join("-",
-            new[] { gesture.Id, Slug(tablet), at.ToString("yyyyMMdd-HHmmss") }
+    public static string Suggest(Gesture gesture, string tablet, DateTimeOffset at, string name = "")
+    {
+        var lead = Slug(name ?? "");
+
+        return string.Join("-",
+            new[] { lead.Length > 0 ? lead : gesture.Id, Slug(tablet), at.ToString("yyyyMMdd-HHmmss") }
                 .Where(part => part.Length > 0));
+    }
 
     private static string Slug(string name)
     {

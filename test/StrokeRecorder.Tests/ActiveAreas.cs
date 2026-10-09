@@ -350,10 +350,10 @@ public class ActiveAreas
     }
 
     /// <summary>Loaded once: the library refuses to register one schema id twice in a process.</summary>
-    private static readonly Lazy<Json.Schema.JsonSchema> Schema = new(
+    internal static readonly Lazy<Json.Schema.JsonSchema> Schema = new(
         () => Json.Schema.JsonSchema.FromText(File.ReadAllText(SchemaPath()!)));
 
-    private static string? SchemaPath()
+    internal static string? SchemaPath()
     {
         for (var at = new DirectoryInfo(AppContext.BaseDirectory); at is not null; at = at.Parent)
         {
