@@ -430,7 +430,7 @@ public partial class MainWindow : Window
 
         this.FindControl<TextBox>("FileName")!.TextChanged += (_, _) => Foot();
 
-        foreach (var box in new[] { "Tablet", "Driver", "Firmware", "Username", "Intent", "Notes" })
+        foreach (var box in new[] { "RecordingName", "Tablet", "Driver", "Firmware", "Username", "Intent", "Notes" })
         {
             this.FindControl<TextBox>(box)!.TextChanged += (_, _) => Named();
         }
@@ -1448,6 +1448,7 @@ public partial class MainWindow : Window
         var username = _take.Username.Length > 0 ? _take.Username : _remembered.Username;
         var intent = _take.Intent;
         var notes = _take.Notes;
+        var chosenName = _take.Name;
 
         this.FindControl<TextBox>("FileName")!.Text = "";
         this.FindControl<TextBox>("Tablet")!.Text = tablet;
@@ -1456,6 +1457,7 @@ public partial class MainWindow : Window
         this.FindControl<TextBox>("Username")!.Text = username;
         this.FindControl<TextBox>("Intent")!.Text = intent;
         this.FindControl<TextBox>("Notes")!.Text = notes;
+        this.FindControl<TextBox>("RecordingName")!.Text = chosenName;
         this.FindControl<TextBlock>("Folder")!.Text = TakesFolder;
 
         Named();
@@ -1521,6 +1523,7 @@ public partial class MainWindow : Window
     {
         if (_take is null) return;
 
+        _take.Name = this.FindControl<TextBox>("RecordingName")!.Text?.Trim() ?? "";
         _take.Tablet = this.FindControl<TextBox>("Tablet")!.Text?.Trim() ?? "";
         _take.Driver = this.FindControl<TextBox>("Driver")!.Text?.Trim() ?? "";
         _take.Firmware = this.FindControl<TextBox>("Firmware")!.Text?.Trim() ?? "";
@@ -1535,7 +1538,7 @@ public partial class MainWindow : Window
         // is worse than no suggestion at all.
         if ((box.Text ?? "") == _suggested)
         {
-            _suggested = Trace.Suggest(_take.Gesture, _take.Tablet, _take.At);
+            _suggested = Trace.Suggest(_take.Gesture, _take.Tablet, _take.At, _take.Name);
             box.Text = _suggested;
         }
 
@@ -1562,6 +1565,7 @@ public partial class MainWindow : Window
         $"""
          format             {Trace.Format} v{Trace.Version}
          gesture            {take.Gesture.Id}
+         name               {(take.Name.Length == 0 ? "(none: the corpus will use the file name)" : take.Name)}
          intent             {(take.Intent.Length == 0 ? "(none)" : take.Intent)}
          username           {(take.Username.Length == 0 ? "(none)" : take.Username)}
          notes              {(take.Notes.Length == 0 ? "(none)" : take.Notes)}
@@ -1603,7 +1607,7 @@ public partial class MainWindow : Window
 
         var name = this.FindControl<TextBox>("FileName")!.Text?.Trim() ?? "";
 
-        if (name.Length == 0) name = Trace.Suggest(_take.Gesture, _take.Tablet, _take.At);
+        if (name.Length == 0) name = Trace.Suggest(_take.Gesture, _take.Tablet, _take.At, _take.Name);
 
         try
         {

@@ -290,6 +290,12 @@
              the two fields directly beneath it being called Tablet and Driver. -->
         <StackPanel Spacing="10">
           <StackPanel Spacing="4">
+            <TextBlock Text="Name" Classes="label" />
+            <TextBox Name="RecordingName" Watermark="What to call this recording" MaxLength="120" />
+            <TextBlock Text="Shown in the corpus. Leave it empty and the file name is used." Classes="lede" FontSize="11" TextWrapping="Wrap" />
+          </StackPanel>
+
+          <StackPanel Spacing="4">
             <TextBlock Text="Tablet" Classes="label" />
             <TextBox Name="Tablet" Watermark="Wacom Cintiq 24" />
           </StackPanel>

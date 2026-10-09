@@ -87,6 +87,7 @@ public static class Reopen
                 Conventions = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Conventions),
                 ActiveArea = Area(root),
                 Intent = Text(root, TraceFormat.Field.Intent),
+                Name = Text(root, TraceFormat.Field.Name),
                 Username = Text(root, TraceFormat.Field.Username),
                 Notes = Text(root, TraceFormat.Field.Notes),
                 EndedBy = Text(root, TraceFormat.Field.EndedBy),
