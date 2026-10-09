@@ -102,7 +102,7 @@ An existing clone catches up with `git submodule update --init --recursive`.
 - `vendor/StrokeKit` is [StrokeKit](https://github.com/TheSevenPens/StrokeKit), the drawing
   core — readings, strokes, the trace format, and the pen stream this polls. WinPenKit is a
   submodule of *that*, which is why the clone has to be recursive.
-- `corpus/` is StrokeCorpus. The tests read all 33 published recordings back through the same
+- `corpus/` is StrokeCorpus. The tests read every published recording back through the same
   reader that writes them, which is how a round-trip fault that reached every published file
   was found; without the submodule those cases have nothing to run against.
 
@@ -117,7 +117,7 @@ Cloning somewhere short is enough; `git config core.longpaths true` is the other
 
 ## Tests
 
-65, and none of them needs a tablet or a window. What the recorder does with readings it is
+100, and none of them needs a tablet or a window. What the recorder does with readings it is
 given — the capture state machine, the accounting, the time semantics, the trace round trip —
 is all checkable without hardware, and that is where a fault sat long enough to reach every
 published recording before anybody looked.

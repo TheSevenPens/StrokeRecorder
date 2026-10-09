@@ -197,7 +197,7 @@ public class RoundTrip
     /// <summary>Every published recording, read and written and read again.</summary>
     /// <remarks>
     /// Over the corpus rather than over one made-up take, because the corpus is what people
-    /// actually open: 33 recordings across six format versions, which is a wider set of
+    /// actually open: the published recordings, across every format version they use, which is a wider set of
     /// shapes than anybody would think to construct.
     /// </remarks>
     [Fact]
