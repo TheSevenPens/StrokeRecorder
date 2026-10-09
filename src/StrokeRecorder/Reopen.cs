@@ -84,6 +84,7 @@ public static class Reopen
                 Tablet = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Tablet),
                 Driver = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Driver),
                 Firmware = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Firmware),
+                Pen = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Pen),
                 Conventions = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Conventions),
                 ActiveArea = Area(root),
                 Intent = Text(root, TraceFormat.Field.Intent),

@@ -135,6 +135,10 @@ public static class Trace
         json.WriteString(TraceFormat.Field.Tablet, take.Tablet);
         json.WriteString(TraceFormat.Field.Driver, take.Driver);
         json.WriteString(TraceFormat.Field.Firmware, take.Firmware);
+
+        // Only when somebody said. Absent is how "not said" is written, and the schema does not
+        // accept an empty pen.
+        if (take.Pen.Length > 0) json.WriteString(TraceFormat.Field.Pen, take.Pen);
         json.WriteString(TraceFormat.Field.Api, take.Api.ToString());
 
         // The number the readings do not carry and cannot. Without it every pressure below

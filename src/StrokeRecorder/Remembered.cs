@@ -23,7 +23,7 @@ namespace StrokeRecorder;
 /// </remarks>
 public sealed record Remembered(
     string Tablet = "", string Driver = "", double Diameter = 25,
-    string Firmware = "", string Username = "")
+    string Firmware = "", string Username = "", string Pen = "")
 {
     private static string Where => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),

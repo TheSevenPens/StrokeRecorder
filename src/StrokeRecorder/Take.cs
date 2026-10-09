@@ -622,6 +622,14 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
     /// <summary>The tablet's firmware, typed in for the same reason the driver is.</summary>
     public string Firmware { get; set; } = "";
 
+    /// <summary>Which pen was used, typed in because nothing the tablet reports names it.</summary>
+    /// <remarks>
+    /// Written to the file only when it says something. Unlike a recording's name it is part of the
+    /// evidence, so it cannot be added to a recording afterwards; empty means nobody said, and the
+    /// file then carries no pen at all.
+    /// </remarks>
+    public string Pen { get; set; } = "";
+
     /// <summary>Who made the recording, as they chose to put it.</summary>
     public string Username { get; set; } = "";
 
