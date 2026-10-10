@@ -344,6 +344,10 @@ public partial class MainWindow : Window
             var box = this.FindControl<TextBox>(name)!;
 
             box.TextChanged += (_, _) => Named(name.Contains("Tablet"), box.Text ?? "");
+
+            // Whitespace round the name is stripped when the person leaves the box, not as they type:
+            // the space after "Wacom" is trailing until the next letter arrives.
+            box.LostFocus += (_, _) => box.Text = Typed.Clean(box.Text);
         }
 
         this.FindControl<TextBox>("ProbeTablet")!.Text = _remembered.Tablet;
@@ -1484,8 +1488,9 @@ public partial class MainWindow : Window
 
         try
         {
-            value = value.Trim();
-
+            // The other box shows exactly what was typed in this one, spaces and all. Only what is kept
+            // is cleaned: stripping the box itself on every keystroke removed the space after "Wacom"
+            // before the next letter could follow it.
             foreach (var name in tablet ? new[] { "ProbeTablet", "Tablet" }
                                         : ["ProbeDriver", "Driver"])
             {
@@ -1494,15 +1499,17 @@ public partial class MainWindow : Window
                 if ((box.Text ?? "") != value) box.Text = value;
             }
 
+            var kept = Typed.Clean(value);
+
             if (_take is not null)
             {
-                if (tablet) _take.Tablet = value;
-                else _take.Driver = value;
+                if (tablet) _take.Tablet = kept;
+                else _take.Driver = kept;
             }
 
             _remembered = tablet
-                ? _remembered with { Tablet = value }
-                : _remembered with { Driver = value };
+                ? _remembered with { Tablet = kept }
+                : _remembered with { Driver = kept };
 
             _remembered.Write();
         }
