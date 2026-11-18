@@ -109,6 +109,14 @@ public static class Trace
         json.WriteString(TraceFormat.Field.Username, take.Username);
         json.WriteString(TraceFormat.Field.Notes, take.Notes);
         json.WriteString(TraceFormat.Field.RecordedAt, take.At.ToString("O"));
+        if (take.HostOS is { } host)
+        {
+            json.WritePropertyName("hostOS");
+            // Keep the metadata on a single line so the corpus can verify later label corrections.
+            json.WriteRawValue(host.Version is { } version
+                ? JsonSerializer.Serialize(new { name = host.Name, version })
+                : JsonSerializer.Serialize(new { name = host.Name }));
+        }
         json.WriteString(TraceFormat.Field.EndedBy, take.EndedBy);
         json.WriteNumber(TraceFormat.Field.StrokeCount, take.Strokes);
         json.WriteBoolean(TraceFormat.Field.KeptEveryAirborneReading, take.KeepingAloft);

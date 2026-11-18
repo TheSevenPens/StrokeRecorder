@@ -297,6 +297,10 @@ public sealed class Take(Gesture gesture, InputApi api, int fullScalePressure, I
     /// </remarks>
     public DateTimeOffset At { get; init; } = DateTimeOffset.Now;
 
+    /// <summary>The OS that captured the take, or null when an imported recording did not say.</summary>
+    public (string Name, string? Version)? HostOS { get; init; } =
+        ("Windows", Environment.OSVersion.Version.ToString());
+
     /// <summary>
     /// How many polls contributed to this take.
     /// </summary>

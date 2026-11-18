@@ -81,6 +81,7 @@ public static class Reopen
                 At = DateTimeOffset.TryParse(Text(root, TraceFormat.Field.RecordedAt), out var when)
                     ? when
                     : DateTimeOffset.Now,
+                HostOS = ReadHostOS(root),
                 Tablet = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Tablet),
                 Driver = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Driver),
                 Firmware = Text(root, TraceFormat.Field.Device, TraceFormat.Field.Firmware),
@@ -221,6 +222,16 @@ public static class Reopen
             Number(placed, TraceFormat.Field.ScaleY) is var sy and not 0 ? sy : 1,
             Number(placed, TraceFormat.Field.OriginX),
             Number(placed, TraceFormat.Field.OriginY));
+    }
+
+    private static (string Name, string? Version)? ReadHostOS(JsonElement root)
+    {
+        if (!root.TryGetProperty("hostOS", out var host) || host.ValueKind != JsonValueKind.Object
+            || Text(host, "name") is not { Length: > 0 } name)
+            return null;
+
+        var version = Text(host, "version");
+        return (name, version.Length == 0 ? null : version);
     }
 
     private static string Text(JsonElement root, params string[] path)

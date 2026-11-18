@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using StrokeRecorder;
 using StrokeKit.Strokes;
 using StrokeKit.Surfaces;
@@ -79,6 +80,44 @@ public class RoundTrip
 
             Assert.True(back.Take is not null,
                 $"a take this recorder wrote could not be read back: {back.Why}");
+            var host = JsonNode.Parse(File.ReadAllText(path))!["hostOS"]!;
+            Assert.Equal("Windows", host["name"]!.GetValue<string>());
+            Assert.Equal(Environment.OSVersion.Version.ToString(), host["version"]!.GetValue<string>());
+        }
+        finally
+        {
+            Clear(path);
+        }
+    }
+
+    [Theory]
+    [InlineData(null, null)]
+    [InlineData("Windows", null)]
+    [InlineData("Windows", "10.0.19045")]
+    public void ResavingUsesTheOriginalHostOS(string? name, string? version)
+    {
+        var path = Written(Made(withHostClock: true));
+        try
+        {
+            var file = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+            file.Remove("hostOS");
+            if (name is not null)
+            {
+                var metadata = new JsonObject { ["name"] = name };
+                if (version is not null) metadata["version"] = version;
+                file["hostOS"] = metadata;
+            }
+            File.WriteAllText(path, file.ToJsonString());
+
+            var original = Reopen.From(path);
+            Assert.NotNull(original.Take);
+            var copy = Trace.Write(original.Take, Path.GetDirectoryName(path)!, "copy");
+            var reopened = Reopen.From(copy);
+            Assert.NotNull(reopened.Take);
+            if (name is null)
+                Assert.Null(reopened.Take.HostOS);
+            else
+                Assert.Equal(((string Name, string? Version)?)(name, version), reopened.Take.HostOS);
         }
         finally
         {
