@@ -21,7 +21,9 @@ Five steps, in one window.
 3. **Record.** Space to arm, space to stop, escape to discard.
 4. **Analysis.** What was captured: every reading, the two clocks, the approach and departure,
    and a ledger that has to balance.
-5. **Save.** Named, and written as a trace.
+5. **Save.** Give the recording a descriptive name and save it as a trace.
+   StrokeCorpus uses the name to group familiar patterns under a stroke type.
+   Unfamiliar patterns appear under **Other** and keep the name you entered.
 
 ## The trace format
 
